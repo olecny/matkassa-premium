@@ -21,21 +21,27 @@
 <body>
   <header class="topbar" id="topbar">
     <div class="topbar-row">
-      <span class="bar-title" id="bar-title" aria-hidden="true">Tilbud</span>
+      <span class="bar-title" id="bar-title" aria-hidden="true">Hjem</span>
       <button id="refresh" class="icon-btn" type="button" aria-label="Oppdater tilbud" title="Oppdater tilbud">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>
       </button>
     </div>
   </header>
   <div class="large-title" id="large-title">
-    <h1 id="view-title">Tilbud</h1>
+    <h1 id="view-title">Hjem</h1>
     <p id="status" class="status" role="status" aria-live="polite"></p>
   </div>
 
   <main>
+    <div id="geo-card" class="card geo-card" role="region" aria-label="Finn tilbud nær deg" hidden></div>
+
+    <!-- Hjem -->
+    <section id="view-hjem" class="view" data-title="Hjem">
+      <div id="home-body"></div>
+    </section>
+
     <!-- Tilbud -->
-    <section id="view-tilbud" class="view" data-title="Tilbud">
-      <div id="geo-card" class="card geo-card" role="region" aria-label="Finn tilbud nær deg" hidden></div>
+    <section id="view-tilbud" class="view" data-title="Tilbud" hidden>
       <div class="toolbar">
         <label class="search">
           <span class="sr-only">Søk i tilbud</span>
@@ -98,7 +104,11 @@
   </main>
 
   <nav class="tabbar" aria-label="Hovedmeny">
-    <button type="button" data-tab="tilbud" aria-current="page">
+    <button type="button" data-tab="hjem" aria-current="page">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg>
+      <span>Hjem</span>
+    </button>
+    <button type="button" data-tab="tilbud">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12V4h8l10 10-8 8L3 12z"/><circle cx="7.5" cy="8.5" r="1.5"/></svg>
       <span>Tilbud</span>
     </button>

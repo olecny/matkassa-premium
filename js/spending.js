@@ -204,3 +204,20 @@ export function summarize(receipts, classify, categories) {
   }
   return { months, uncat: [...uncat.values()].sort((a, b) => b.amount - a.amount) };
 }
+
+/** This month so far vs the same days of last month (fair mid-month), plus last month's full total. today = 'YYYY-MM-DD'. */
+export function monthCompare(receipts, today) {
+  const thisKey = today.slice(0, 7);
+  const [y, m] = thisKey.split('-').map(Number);
+  const d = new Date(y, m - 2, 1);
+  const lastKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const day = today.slice(8, 10);
+  let now = 0, lastSoFar = 0, lastAll = 0, count = 0;
+  for (const r of receipts) {
+    if (!r || typeof r.date !== 'string') continue;
+    const t = Number(r.total) || 0;
+    if (r.date.startsWith(thisKey) && r.date.slice(8, 10) <= day) { now += t; count += 1; }
+    else if (r.date.startsWith(lastKey)) { lastAll += t; if (r.date.slice(8, 10) <= day) lastSoFar += t; }
+  }
+  return { thisKey, lastKey, now, count, lastSoFar, lastAll };
+}

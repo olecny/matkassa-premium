@@ -4,12 +4,13 @@ import { DEFAULT_CATEGORIES, makeClassifier, normalize, tokens } from './categor
 import { buildProfile, scoreOffer, normEan } from './profile.js';
 import { parseExtraOffers, mergeExtraOffers, eanCoverage } from './extra-offers.js';
 import { defaultSettings, mergeSettings, validArea } from './settings.js';
-import { detectImport, mergeReceipts, summarize, toNumber, UNCAT, BACKUP_SCHEMA } from './spending.js';
+import { detectImport, mergeReceipts, summarize, monthCompare, toNumber, UNCAT, BACKUP_SCHEMA } from './spending.js';
 import { enableSheetDrag, watchLargeTitle, moveTabIndicator, exitRow, flip } from './motion.js';
 
 const APP_VERSION = '0.5.0-premium.1';
 const STALE_MS = 6 * 60 * 60 * 1000;
 const PAGE = 60;
+const TABS = ['hjem', 'tilbud', 'liste', 'forbruk', 'mer'];
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -24,7 +25,7 @@ const titleCase = (s) => (s === s.toUpperCase() ? s.charAt(0) + s.slice(1).toLow
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
 const state = {
-  tab: 'tilbud',
+  tab: 'hjem',
   offersData: null, // {fetchedAt, chains, offers}
   list: [],
   categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
@@ -167,6 +168,7 @@ function hideToast() {
 }
 
 /* ---------- tabs ---------- */
+let homeEnterTimer;
 function showTab(tab) {
   state.tab = tab;
   for (const v of document.querySelectorAll('.view')) v.hidden = v.id !== `view-${tab}`;
@@ -175,8 +177,17 @@ function showTab(tab) {
     else b.removeAttribute('aria-current');
   }
   $('#view-title').textContent = $('#bar-title').textContent = $(`#view-${tab}`).dataset.title;
-  moveTabIndicator($('#tab-indicator'), ['tilbud', 'liste', 'forbruk', 'mer'].indexOf(tab));
+  moveTabIndicator($('#tab-indicator'), TABS.indexOf(tab));
   $('#refresh').hidden = tab !== 'tilbud' && tab !== 'liste';
+  $('#geo-card').classList.toggle('off-tab', tab !== 'hjem' && tab !== 'tilbud');
+  if (tab === 'hjem') { // the staggered arrival plays once per visit, not on every re-render
+    const hb = $('#home-body');
+    hb.classList.remove('home-enter');
+    void hb.offsetWidth;
+    hb.classList.add('home-enter');
+    clearTimeout(homeEnterTimer);
+    homeEnterTimer = setTimeout(() => hb.classList.remove('home-enter'), 450);
+  }
   render();
   window.scrollTo(0, 0);
   try { history.replaceState(null, '', '#' + tab); } catch (e) { /* file:// */ }
@@ -185,6 +196,7 @@ function showTab(tab) {
 function render() {
   renderStatus();
   renderBadge();
+  if (state.tab === 'hjem') renderHome();
   if (state.tab === 'tilbud') renderOffers();
   if (state.tab === 'liste') renderList();
   if (state.tab === 'forbruk') renderSpending();
@@ -506,6 +518,74 @@ function renderList() {
   clear.hidden = !done;
   clear.textContent = `Fjern avkryssede (${done})`;
 }
+
+/* ---------- home ---------- */
+function homeItemBadge(i) {
+  const o = linkedOffer(i);
+  if (o && !(o.till && o.till < Date.now())) return `<span class="deal-tag">${esc(o.chain)} – ${kr(o.price)}</span>`;
+  const d = dealsFor(i.text, i.eans)[0];
+  return d ? `<span class="deal-tag">${esc(d.chain)} – ${kr(d.price)}</span>` : '';
+}
+
+function miniTrend(months, endKey) {
+  const keys = [];
+  for (let i = 5; i >= 0; i--) keys.push(shiftMonth(endKey, -i));
+  const vals = keys.map((k) => (months.get(k) ? months.get(k).total : 0));
+  const max = Math.max(...vals, 1);
+  const W = 120, H = 40, bw = W / 6;
+  const bars = vals.map((v, i) => `<path class="bar${i === 5 ? ' sel' : ''}" d="${barPath(i * bw + 2, H, bw - 4, (v / max) * (H - 2))}"/>`).join('');
+  const label = 'Siste 6 måneder: ' + keys.map((k, i) => `${monthShort.format(monthDate(k)).replace('.', '')} ${krShort(vals[i])}`).join(', ');
+  return `<svg class="mini-trend" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">${bars}</svg>`;
+}
+
+function renderHome() {
+  const body = $('#home-body');
+  const parts = [];
+  // Spending overview → Forbruk
+  if (!state.receipts.length) {
+    parts.push(`<a class="card home-card" href="#forbruk" data-gototab="forbruk" id="home-spend">
+      <h2>Forbruk</h2>
+      <p class="home-empty">Ingen kvitteringer ennå. Importer Trumf-innsyn eller legg inn en kvittering, så ser du hva du bruker på mat her.</p>
+      <span class="home-more">Gå til Forbruk</span></a>`);
+  } else {
+    const c = monthCompare(state.receipts, todayISO());
+    const sum = summarize(state.receipts, classify, state.categories);
+    const focus = c.count ? c.thisKey : c.lastKey;
+    const fm = sum.months.get(focus) || { total: 0, byCat: new Map() };
+    const rows = [...fm.byCat.entries()].filter(([, v]) => v >= 0.5).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    const max = Math.max(1, ...rows.map(([, v]) => v));
+    let cmp;
+    if (c.lastSoFar > 0 && c.count) {
+      const pct = Math.round(((c.now - c.lastSoFar) / c.lastSoFar) * 100);
+      cmp = `${pct === 0 ? 'Like mye som' : `${Math.abs(pct)} % ${pct > 0 ? 'mer' : 'mindre'} enn`} samme tid i ${esc(monthFmt.format(monthDate(c.lastKey)).split(' ')[0])} (${krShort(c.lastSoFar)})`;
+    } else if (c.lastAll > 0) {
+      cmp = `${esc(titleCaseFirst(monthFmt.format(monthDate(c.lastKey)).split(' ')[0]))} totalt: ${krShort(c.lastAll)}`;
+    } else cmp = `${c.count} kvittering${c.count === 1 ? '' : 'er'} denne måneden`;
+    parts.push(`<a class="card home-card" href="#forbruk" data-gototab="forbruk" id="home-spend">
+      <div class="home-head"><div><h2>Brukt i ${esc(monthFmt.format(monthDate(c.thisKey)).split(' ')[0])}</h2>
+        <p class="hero">${krShort(c.now)}</p><p class="hero-sub">${cmp}</p></div>${miniTrend(sum.months, c.thisKey)}</div>
+      ${rows.length ? `<p class="home-label">${focus === c.thisKey ? 'Mest brukt på' : `Mest brukt på i ${esc(monthFmt.format(monthDate(focus)).split(' ')[0])}`}</p>
+      <ul class="bars">${rows.map(([id, v]) => { const cat = catById(id); return `<li><div class="row"><span>${esc(cat ? cat.name : 'Ukategorisert')}</span><span>${krShort(v)}</span></div>
+        <div class="track"><div class="fill${cat ? '' : ' uncat'}" style="width:${((v / max) * 100).toFixed(1)}%;--c:${esc(cat ? cat.color : '')}"></div></div></li>`; }).join('')}</ul>` : ''}
+      <span class="home-more">Se alt forbruk</span></a>`);
+  }
+  // Shopping list → Handleliste
+  const open = state.list.filter((i) => !i.done);
+  parts.push(`<a class="card home-card" href="#liste" data-gototab="liste" id="home-list">
+    <h2>Handleliste${open.length ? ` <small>· ${open.length} igjen</small>` : ''}</h2>
+    ${open.length ? `<ul class="home-items">${open.slice(0, 4).map((i) => `<li><span class="name">${esc(i.text)}</span>${homeItemBadge(i)}</li>`).join('')}</ul>
+      ${open.length > 4 ? `<span class="home-more">+${open.length - 4} til</span>` : '<span class="home-more">Åpne handlelisten</span>'}`
+    : '<p class="home-empty">Handlelisten er tom. Legg til varer, eller trykk + på et tilbud.</p><span class="home-more">Åpne handlelisten</span>'}</a>`);
+  // Offers for you (only once something is learned)
+  const feat = featuredOffers(6);
+  if (feat.length) {
+    parts.push(`<section class="home-feat" aria-labelledby="home-feat-h"><h2 id="home-feat-h">Tilbud for deg</h2>
+      <ul>${feat.map(({ o }) => `<li><a href="#tilbud" data-gototab="tilbud">${o.img ? `<img src="${esc(o.img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '<span class="noimg"></span>'}
+        <span class="ft">${esc(titleCase(o.title))}</span><span class="fp">${kr(o.price)}</span><span class="chain" style="--c:${esc(chainColor(o.chainId, o.color))}">${esc(o.chain)}</span></a></li>`).join('')}</ul></section>`);
+  }
+  body.innerHTML = parts.join('');
+}
+const titleCaseFirst = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /* ---------- spending ---------- */
 function shiftMonth(key, delta) {
@@ -1025,6 +1105,13 @@ function bind() {
     if (b) showTab(b.dataset.tab);
   });
   $('#refresh').addEventListener('click', () => loadOffers(true));
+  window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (TABS.includes(h) && h !== state.tab) showTab(h); });
+  $('#view-hjem').addEventListener('click', (e) => {
+    const a = e.target.closest('[data-gototab]');
+    if (!a) return;
+    e.preventDefault();
+    showTab(a.dataset.gototab);
+  });
 
   let searchTimer;
   $('#offer-search').addEventListener('input', (e) => {
@@ -1278,7 +1365,7 @@ async function start() {
   }
   rebuildClassifier();
   const hash = location.hash.slice(1);
-  showTab(['tilbud', 'liste', 'forbruk', 'mer'].includes(hash) ? hash : 'tilbud');
+  showTab(TABS.includes(hash) ? hash : 'hjem');
   db.persist().then((p) => (state.persisted = p));
   originalExists().then((v) => { state.originalExists = v; if (v && state.tab === 'mer') renderMore(); });
   loadOffers();

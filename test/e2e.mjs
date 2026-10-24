@@ -203,6 +203,8 @@ const waitFor = async (expr, ms = 15000) => {
   return false;
 };
 const navigate = async (url) => {
+  // A URL with #tab on the page already open would only change the fragment; go via about:blank for a real fresh start.
+  if (url.includes('#')) { await send('Page.navigate', { url: 'about:blank' }, S); await sleep(150); }
   const loaded = new Promise((r) => { const l = (m) => { if (m.method === 'Page.loadEventFired' && m.sessionId === S) { listeners.splice(listeners.indexOf(l), 1); r(); } }; listeners.push(l); });
   await send('Page.navigate', { url }, S);
   await Promise.race([loaded, sleep(15000)]);
@@ -303,7 +305,7 @@ async function locationTests() {
     await send('Emulation.setGeolocationOverride', { latitude: 60.391263, longitude: 5.322054, accuracy: 30 }, S); // Bergen (FAKE position)
     await send('Page.addScriptToEvaluateOnNewDocument', { source: geoSpy(false) }, S);
     const n0 = tjekAreas.length;
-    await navigate(BASE + 'index.html');
+    await navigate(BASE + 'index.html#tilbud');
     check(await waitFor(`document.querySelectorAll('#offer-list li').length > 0`, 20000), 'location allowed: offers render');
     const st = await waitSettings((v) => v.area);
     check(st && st.area && st.area.name === 'Min posisjon' && st.area.lat === 60.39 && st.area.lng === 5.32 && st.geo === 'done', 'location allowed: area = rounded position (≈1 km), stored once', JSON.stringify(st && st.area));
@@ -313,7 +315,7 @@ async function locationTests() {
     await waitFor(`!document.querySelector('#refresh').classList.contains('spinning')`, 15000);
     await tab('mer');
     check(await evaluate(`return document.querySelector('#area-select').selectedOptions[0].textContent === 'Min posisjon';`), 'location allowed: Mer → Område shows "Min posisjon"');
-    await navigate(BASE + 'index.html');
+    await navigate(BASE + 'index.html#tilbud');
     await waitFor(`document.querySelectorAll('#offer-list li').length > 0`, 15000);
     await sleep(500);
     check(await evaluate(`return window.__geoCalls === 0;`), 'location allowed: not asked again on the next start');
@@ -324,7 +326,7 @@ async function locationTests() {
     await send('Browser.setPermission', { permission: { name: 'geolocation' }, setting: 'denied', origin: ORIGIN, browserContextId: ctx });
     await send('Page.addScriptToEvaluateOnNewDocument', { source: geoSpy(false) }, S);
     const n0 = tjekAreas.length;
-    await navigate(BASE + 'index.html');
+    await navigate(BASE + 'index.html#tilbud');
     check(await waitFor(`document.querySelectorAll('#offer-list li').length > 0`, 20000), 'location denied: offers render (fallback)');
     check(await waitFor(`/Trondheim/.test(document.querySelector('#toast').textContent)`, 5000), 'location denied: toast says Trondheim + Mer → Område', await toastText());
     const st = await readSettings();
@@ -332,7 +334,7 @@ async function locationTests() {
     check(tjekAreas.slice(n0).every((a) => a === '63.4305,10.3951'), 'location denied: offers for Trondheim', tjekAreas.slice(n0).join(' | '));
     check(!(await geoCardShown()), 'location denied: no card');
     await shot('00b-location-denied');
-    await navigate(BASE + 'index.html');
+    await navigate(BASE + 'index.html#tilbud');
     await waitFor(`document.querySelectorAll('#offer-list li').length > 0`, 15000);
     await sleep(500);
     check(await evaluate(`return window.__geoCalls === 0 && !document.querySelector('#toast').textContent.includes('posisjon');`), 'location denied: no prompt or toast on the next start');
@@ -346,14 +348,14 @@ async function locationTests() {
   // L3. iOS-like: the automatic request gets no answer without a tap → clear card; the tap then works.
   await inFreshContext('location needs a tap', async (ctx) => {
     await send('Page.addScriptToEvaluateOnNewDocument', { source: geoSpy(true) }, S);
-    await navigate(BASE + 'index.html');
+    await navigate(BASE + 'index.html#tilbud');
     check(await waitFor(`!document.querySelector('#geo-card').hidden`, 8000), 'location needs a tap: first-run card "Finn tilbud nær deg" shown');
     check(await evaluate(`return /Finn tilbud nær deg/.test(document.querySelector('#geo-card').textContent) && !!document.querySelector('#geo-card [data-action="geo-ask"]');`), 'location needs a tap: card has a "Finn tilbud nær deg" button');
     check(await waitFor(`document.querySelectorAll('#offer-list li').length > 0`, 20000) && lastArea() === '63.4305,10.3951', 'location needs a tap: Trondheim offers meanwhile', lastArea());
     check(await noHScroll(), 'location needs a tap: no horizontal scroll with the card');
     await a11yAudit('first-run card');
     await shot('00a-location-card');
-    await navigate(BASE + 'index.html'); // reopen before tapping: card again, but no new prompt
+    await navigate(BASE + 'index.html'); // reopen on Hjem before tapping: card again, but no new prompt
     await waitFor(`document.querySelectorAll('#offer-list li').length > 0`, 15000);
     await sleep(500);
     check(await evaluate(`return window.__geoCalls === 0 && !document.querySelector('#geo-card').hidden;`), 'location needs a tap: reopening shows the card without prompting again');
@@ -375,7 +377,7 @@ async function locationTests() {
       await new Promise((r) => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put({ chains: [], hiddenChains: [], area: { name: 'Bergen', lat: 60.3913, lng: 5.3221, radius: 30000 }, sync: { repo: '', path: 'spending.json', token: '' } }, 'settings'); t.oncomplete = r; });
       db.close(); return true;`);
     const n0 = tjekAreas.length;
-    await navigate(BASE + 'index.html');
+    await navigate(BASE + 'index.html#tilbud');
     check(await waitFor(`document.querySelectorAll('#offer-list li').length > 0`, 20000), 'existing user: offers render');
     await sleep(500);
     const st = await readSettings();
@@ -401,8 +403,8 @@ async function isolationTests() {
       await (await caches.open('matkassa-v7')).put('/matkassa/index.html', new Response('original shell (FAKE)'));
       await (await caches.open('matkassa-img')).put('/img-FAKE.png', new Response('img'));
       return true;`);
-    await navigate(BASE + 'index.html');
-    check(await waitFor(`navigator.serviceWorker && navigator.serviceWorker.controller`, 15000) || (await navigate(BASE + 'index.html'), await waitFor(`navigator.serviceWorker.controller`, 15000)), 'isolation: premium service worker installed and active');
+    await navigate(BASE + 'index.html#tilbud');
+    check(await waitFor(`navigator.serviceWorker && navigator.serviceWorker.controller`, 15000) || (await navigate(BASE + 'index.html#tilbud'), await waitFor(`navigator.serviceWorker.controller`, 15000)), 'isolation: premium service worker installed and active');
     await sleep(500);
     const keys = await evaluate(`return (await caches.keys()).sort();`);
     check(keys.includes('matkassa-v7') && keys.includes('matkassa-img'), "isolation: the original's caches survive premium's install/activate", keys.join(', '));
@@ -426,7 +428,7 @@ async function isolationTests() {
 
   // I2. No original on this origin: premium must not create an empty 'matkassa' database (that would break it).
   await inFreshContext('no original', async () => {
-    await navigate(BASE + 'index.html');
+    await navigate(BASE + 'index.html#tilbud');
     await waitFor(`document.querySelectorAll('#offer-list li').length > 0`, 20000);
     await tab('mer');
     await sleep(800);
@@ -519,8 +521,19 @@ try {
   // The main run below starts as a user who said no to location (Trondheim), so it doesn't depend on Chrome's prompt.
   await send('Browser.setPermission', { permission: { name: 'geolocation' }, setting: 'denied', origin: ORIGIN });
 
-  // 1. First start: offers, empty states
+  // 0. First start opens Hjem with empty states
   await navigate(BASE + 'index.html');
+  check(await waitFor(`!document.querySelector('#view-hjem').hidden && !!document.querySelector('#home-spend')`), 'hjem: first tab, shown on start');
+  check(await evaluate(`return document.querySelector('.tabbar button').dataset.tab === 'hjem' && document.querySelector('.tabbar button[data-tab="hjem"]').getAttribute('aria-current') === 'page';`), 'hjem: first in the tab bar and marked current');
+  check(await evaluate(`return /Ingen kvitteringer/.test(document.querySelector('#home-spend').textContent) && /tom/.test(document.querySelector('#home-list').textContent) && !document.querySelector('.home-feat');`), 'hjem: empty states for a new user (no spending, empty list, no "Tilbud for deg")');
+  check(await noHScroll(), 'hjem: no horizontal scroll at 390px');
+  await a11yAudit('hjem');
+  await shot('00-hjem-tom');
+  await click('#home-list');
+  check(await evaluate(`return !document.querySelector('#view-liste').hidden && location.hash === '#liste';`), 'hjem: tapping the list card opens Handleliste');
+
+  // 1. First start: offers, empty states
+  await navigate(BASE + 'index.html#tilbud');
   check(await waitFor(`document.querySelectorAll('#offer-list li').length > 0`, 20000), 'offers load and render', LIVE ? 'live Tjek' : 'fake Tjek');
   const status = await evaluate(`return document.querySelector('#status').textContent;`);
   check(/tilbud fra \d+ kjeder/.test(status), 'status line shows offer + chain count', status);
@@ -586,6 +599,32 @@ try {
   fixtureCheck(await evaluate(`return /strekkode/.test(document.querySelector('#offer-list').textContent);`), 'offer list card shows the match kind');
   await shot('04-tilbud-for-deg');
 
+  // 5b. Hjem with data: spending overview, list items with offer badges, offers for you
+  await tab('liste');
+  for (const t of ['melk', 'kaffe', 'egg', 'brød', 'bananer']) await evaluate(`document.querySelector('#list-input').value = '${t}'; document.querySelector('#list-form').requestSubmit(); return true;`);
+  await tab('hjem');
+  const home = await evaluate(`return { hero: document.querySelector('#home-spend .hero')?.textContent || '', trend: !!document.querySelector('#home-spend svg.mini-trend[aria-label*="Siste 6"]'),
+    items: document.querySelectorAll('#home-list .home-items li').length, more: document.querySelector('#home-list .home-more')?.textContent || '',
+    badges: document.querySelectorAll('#home-list .deal-tag').length, feat: document.querySelectorAll('.home-feat li').length };`);
+  check(/\d.*kr/.test(home.hero) && home.trend, 'hjem: this month total + 6-month mini trend', JSON.stringify(home));
+  check(home.items === 4 && /\+\d+ til/.test(home.more), 'hjem: at most 4 unchecked items, "+N til" for the rest', `${home.items} · ${home.more}`);
+  fixtureCheck(home.badges > 0, 'hjem: list items on sale get an offer badge', `${home.badges} badges`);
+  check(home.feat > 0 && home.feat <= 6, 'hjem: compact "Tilbud for deg" row once something is learned', `${home.feat}`);
+  check(await noHScroll(), 'hjem with data: no horizontal scroll');
+  await a11yAudit('hjem-data');
+  await shot('04b-hjem');
+  await tab('tilbud');
+  await evaluate(`document.querySelector('.tabbar button[data-tab="hjem"]').click(); return true;`);
+  check(await evaluate(`const a = getComputedStyle(document.querySelector('#home-body > *')); const b = getComputedStyle(document.querySelector('#home-body > :nth-child(2)')); return a.animationName === 'home-rise' && parseFloat(a.animationDuration) <= 0.3 && parseFloat(b.animationDelay) > 0;`), 'motion: Hjem cards rise in, staggered, ≤ 300 ms');
+  await sleep(500);
+  check(await evaluate(`return !document.querySelector('#home-body').classList.contains('home-enter');`), 'motion: the arrival plays once per visit (class removed afterwards)');
+  check(await evaluate(`return getComputedStyle(document.querySelector('#tab-indicator')).transform.includes('matrix') && document.querySelectorAll('.tabbar button').length === 5;`), 'tab indicator: 5 tabs, indicator on Hjem');
+  await click('#home-spend');
+  check(await evaluate(`return !document.querySelector('#view-forbruk').hidden;`), 'hjem: tapping the overview opens Forbruk');
+  await tab('hjem');
+  await click('.home-feat a');
+  check(await evaluate(`return !document.querySelector('#view-tilbud').hidden;`), 'hjem: tapping an offer opens Tilbud');
+
   // 6. Hide a chain
   await tab('mer');
   await evaluate(`const cb = document.querySelector('[data-chainshow="257bxm"]'); cb.click(); return true;`);
@@ -630,14 +669,14 @@ try {
 
   // 7d. Narrow phone (iPhone SE 1st gen, 320 px): no sideways scroll on any tab (Maria finding 2)
   await send('Emulation.setDeviceMetricsOverride', { width: 320, height: 568, deviceScaleFactor: 2, mobile: true }, S);
-  for (const t of ['tilbud', 'liste', 'forbruk', 'mer']) { await tab(t); check(await noHScroll(), `320 px: no horizontal scroll on ${t}`); }
+  for (const t of ['hjem', 'tilbud', 'liste', 'forbruk', 'mer']) { await tab(t); check(await noHScroll(), `320 px: no horizontal scroll on ${t}`); }
   await tab('tilbud');
   await shot('05b-tilbud-320');
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true }, S);
 
   // 8. Forbruk with data
   await tab('forbruk');
-  check(await evaluate(`return document.querySelectorAll('.bars li').length > 0 && /kategorisert/.test(document.querySelector('.hero-sub').textContent);`), 'forbruk: categories and % categorised');
+  check(await evaluate(`return document.querySelectorAll('#spend-body .bars li').length > 0 && /kategorisert/.test(document.querySelector('#spend-body .hero-sub').textContent);`), 'forbruk: categories and % categorised');
   check(await noHScroll(), 'forbruk: no horizontal scroll');
   await a11yAudit('forbruk');
   await shot('06-forbruk-lys');
@@ -651,6 +690,13 @@ try {
   await shot('07-forbruk-mork');
   await tab('tilbud');
   await shot('08-tilbud-mork');
+  await tab('hjem');
+  check(await evaluate(`const c = getComputedStyle(document.querySelector('#home-spend')); const t = getComputedStyle(document.querySelector('#home-spend h2')).color; return c.backgroundColor !== 'rgb(255, 255, 255)' && t !== 'rgb(0, 0, 0)';`), 'dark mode: Hjem cards follow the dark theme');
+  await shot('08b-hjem-mork');
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] }, S);
+  await tab('tilbud');
+  await evaluate(`document.querySelector('.tabbar button[data-tab="hjem"]').click(); return true;`);
+  check(await evaluate(`return getComputedStyle(document.querySelector('#home-body > *')).animationName === 'home-fade';`), 'reduced motion: Hjem arrives with a fade only, no movement');
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }, S);
 
   // 10. Huge data: 3 000 receipts × 15 lines
@@ -672,14 +718,14 @@ try {
   await motionTests();
 
   // 11. Offline: service worker serves the app shell, data stays
-  check(await waitFor(`navigator.serviceWorker && navigator.serviceWorker.controller`, 15000) || (await navigate(BASE + 'index.html'), await waitFor(`navigator.serviceWorker.controller`, 15000)), 'service worker controls the page');
+  check(await waitFor(`navigator.serviceWorker && navigator.serviceWorker.controller`, 15000) || (await navigate(BASE + 'index.html#tilbud'), await waitFor(`navigator.serviceWorker.controller`, 15000)), 'service worker controls the page');
   // 11a. Weak signal: the server answers nothing for 8 s. The app must open from cache in ~3 s, not 3 s per
   // waterfall level (index.html → app.js → module imports) (Maria finding 1).
-  await navigate(BASE + 'index.html');
+  await navigate(BASE + 'index.html#tilbud');
   await waitFor(`document.querySelectorAll('#offer-list li').length > 0`);
   stallMs = 8000;
   const s0 = Date.now();
-  await send('Page.navigate', { url: BASE + 'index.html' }, S);
+  await send('Page.navigate', { url: BASE + 'index.html#tilbud' }, S);
   await sleep(300);
   const shown = await waitFor(`document.readyState !== 'loading' && document.querySelectorAll('#offer-list li').length > 0`, 12000);
   const stallTime = Date.now() - s0;
@@ -689,7 +735,7 @@ try {
 
   serverUp = false;
   await send('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 }, S);
-  await navigate(BASE + 'index.html');
+  await navigate(BASE + 'index.html#tilbud');
   check(await waitFor(`document.querySelectorAll('#offer-list li').length > 0`, 15000), 'offline: app shell from cache, offers from IndexedDB');
   await tab('liste');
   check(await evaluate(`return /helmelk/i.test(document.querySelector('#list-items').textContent);`), 'offline: shopping list still there');
