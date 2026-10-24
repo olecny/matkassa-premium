@@ -84,13 +84,19 @@ const offerById = (id) => (offerIndex.find((x) => x.o.id === id) || {}).o;
 
 const catById = (id) => state.categories.find((c) => c.id === id);
 const hiddenChains = () => new Set(state.settings.hiddenChains || []);
+/** Chains with offers: Tjek's, plus any that only come from extra offers (e.g. REMA Superpris without a Tjek catalog). */
+const knownChains = () => {
+  const list = state.offersData ? [...state.offersData.chains] : [];
+  for (const x of offerIndex) if (x.o.chainId && !list.some((c) => c.id === x.o.chainId)) list.push({ id: x.o.chainId, name: x.o.chain, color: x.o.color });
+  return list;
+};
 /** The offer a list item was added from, unless its chain is hidden now. */
 const linkedOffer = (item) => (item.offer && !hiddenChains().has(item.offer.chainId) ? item.offer : null);
 /** True when offers exist but every chain in them is hidden (Mer → Kjeder). */
 const allChainsHidden = () => {
   const d = state.offersData;
   const hidden = hiddenChains();
-  return !!(d && d.chains.length && d.chains.every((c) => hidden.has(c.id)));
+  return !!(d && knownChains().length && knownChains().every((c) => hidden.has(c.id)));
 };
 /** Chain chips the user picked, minus hidden chains. Empty = all. */
 const selectedChains = () => {
@@ -211,7 +217,7 @@ function renderStatus() {
   if (state.loading) el.textContent = state.loading;
   else if (state.error && d) el.textContent = `Viser lagrede tilbud fra ${timeFmt.format(d.fetchedAt)} · ${state.error}`;
   else if (state.error) el.textContent = state.error;
-  else if (d) el.textContent = `${activeOffers().length} tilbud fra ${d.chains.filter((c) => !hiddenChains().has(c.id)).length} kjeder · oppdatert ${timeFmt.format(d.fetchedAt)}`;
+  else if (d) el.textContent = `${activeOffers().length} tilbud fra ${knownChains().filter((c) => !hiddenChains().has(c.id)).length} kjeder · oppdatert ${timeFmt.format(d.fetchedAt)}`;
   else el.textContent = '';
   $('#refresh').classList.toggle('spinning', !!state.loading);
 }
@@ -359,7 +365,7 @@ function renderChips() {
   const d = state.offersData;
   const hidden = hiddenChains();
   const sel = selectedChains();
-  const chains = d ? d.chains.filter((c) => !hidden.has(c.id)) : [];
+  const chains = d ? knownChains().filter((c) => !hidden.has(c.id)) : [];
   $('#chain-chips').innerHTML =
     `<button class="chip" type="button" data-chain="" aria-pressed="${sel.size === 0}">Alle kjeder</button>` +
     chains
@@ -973,7 +979,7 @@ function renderMore() {
     </div>
     <div class="card"><h2>Kjeder</h2>
       <p class="hint" style="margin-top:0">Skjulte kjeder vises ikke i tilbud, filtre eller handlelisten.</p>
-      ${state.offersData ? `<div class="chain-toggles">${[...state.offersData.chains].sort((a, b) => a.name.localeCompare(b.name, 'nb')).map((c) => `<label class="toggle"><input type="checkbox" data-chainshow="${esc(c.id)}" ${hiddenChains().has(c.id) ? '' : 'checked'}><span class="dot" style="--c:${esc(chainColor(c.id, c.color))}"></span>${esc(c.name)}</label>`).join('')}</div>` : '<p class="hint">Kjedene vises når tilbudene er hentet.</p>'}
+      ${state.offersData ? `<div class="chain-toggles">${[...knownChains()].sort((a, b) => a.name.localeCompare(b.name, 'nb')).map((c) => `<label class="toggle"><input type="checkbox" data-chainshow="${esc(c.id)}" ${hiddenChains().has(c.id) ? '' : 'checked'}><span class="dot" style="--c:${esc(chainColor(c.id, c.color))}"></span>${esc(c.name)}</label>`).join('')}</div>` : '<p class="hint">Kjedene vises når tilbudene er hentet.</p>'}
     </div>
     <div class="card"><h2>Kategorier</h2>
       <div id="cat-list">${state.categories.map((c) => `<div class="cat-row">

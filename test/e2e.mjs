@@ -762,19 +762,22 @@ try {
   fixtureCheck(await evaluate(`return /På tilbud hos/.test(document.querySelector('#list-items').textContent);`), 'list: "helmelk" finds an offer by name');
   await tab('tilbud');
   await evaluate(`const li = [...document.querySelectorAll('#offer-list .offer')].find(li => /KJELDSBERG/i.test(li.textContent)) || document.querySelector('#offer-list .offer'); li.querySelector('[data-add]').click(); return true;`);
-  const item = await evaluate(`const db = await new Promise(r => { const q = indexedDB.open('${APP_DB}'); q.onsuccess = () => r(q.result); }); return await new Promise(r => { const q = db.transaction('kv').objectStore('kv').get('list'); q.onsuccess = () => r(q.result.find(i => /Kjeldsberg/i.test(i.text))); });`);
+  const item = await evaluate(`const db = await new Promise(r => { const q = indexedDB.open('${APP_DB}'); q.onsuccess = () => r(q.result); }); return await new Promise(r => { const q = db.transaction('kv').objectStore('kv').get('list'); q.onsuccess = () => r(q.result.find(i => /Kjeldsberg/i.test(i.text)) || [...q.result].filter(i => i.offer).sort((a, b) => b.added - a.added)[0]); });`); // live: whatever offer was added
   fixtureCheck(item && item.eans && item.eans.includes('2000000000015'), 'list: item added from an offer remembers its barcode');
 
   // 7b. Hiding the chain of an offer-linked list item hides its "Tilbud hos …" too (Maria finding 4)
   const linkedChain = item && item.offer ? item.offer.chainId : null;
   const linkedName = item && item.offer ? item.offer.chain : '';
-  await tab('mer');
-  await evaluate(`document.querySelector('[data-chainshow="${linkedChain}"]').click(); return true;`);
-  await tab('liste');
-  const linkedText = await evaluate(`return [...document.querySelectorAll('#list-items .item')].find(li => li.textContent.includes(${JSON.stringify((item && item.text) || '')}))?.textContent || '';`);
-  check(linkedChain && linkedText && !linkedText.includes(`hos ${linkedName}`), 'list: offer-linked item stops showing a hidden chain', linkedText.replace(/\s+/g, ' ').trim().slice(0, 80));
-  await tab('mer');
-  await evaluate(`document.querySelector('[data-chainshow="${linkedChain}"]').click(); return true;`);
+  if (!linkedChain) fixtureCheck(false, 'list: offer-linked item stops showing a hidden chain', 'no offer-linked item');
+  else {
+    await tab('mer');
+    await evaluate(`document.querySelector('[data-chainshow="${linkedChain}"]').click(); return true;`);
+    await tab('liste');
+    const linkedText = await evaluate(`return [...document.querySelectorAll('#list-items .item')].find(li => li.textContent.includes(${JSON.stringify((item && item.text) || '')}))?.textContent || '';`);
+    check(linkedChain && linkedText && !linkedText.includes(`hos ${linkedName}`), 'list: offer-linked item stops showing a hidden chain', linkedText.replace(/\s+/g, ' ').trim().slice(0, 80));
+    await tab('mer');
+    await evaluate(`document.querySelector('[data-chainshow="${linkedChain}"]').click(); return true;`);
+  }
 
   // 7c. All chains hidden → helpful empty state with a way back (Maria finding 3)
   await evaluate(`for (const cb of document.querySelectorAll('[data-chainshow]')) if (cb.checked) cb.click(); return true;`);
