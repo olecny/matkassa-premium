@@ -177,6 +177,29 @@
     <div id="detail-body"></div>
   </dialog>
 
+  <dialog id="dlg-merge" class="sheet" aria-labelledby="merge-h">
+    <div class="grabber" aria-hidden="true"></div>
+    <form method="dialog">
+      <h2 id="merge-h">Slå sammen med kontoen?</h2>
+      <p id="merge-text"></p>
+      <p class="hint">«Slå sammen» beholder alt fra begge steder (samme kvittering telles bare én gang). «Bruk kontoens data» erstatter kvitteringene, listen, kategoriene og reglene på denne enheten med kontoens.</p>
+      <div class="dlg-actions">
+        <button class="btn btn-primary" value="merge">Slå sammen</button>
+        <button class="btn" value="account">Bruk kontoens data</button>
+        <button class="btn btn-ghost" value="cancel">Avbryt</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-connect" class="sheet" aria-labelledby="connect-h">
+    <div class="grabber" aria-hidden="true"></div>
+    <form method="dialog">
+      <h2 id="connect-h">Koble til kjeden</h2>
+      <p id="connect-text"></p>
+      <div class="dlg-actions"><button class="btn btn-primary" value="ok">Lukk</button></div>
+    </form>
+  </dialog>
+
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   <script type="module" src="js/app.js"></script>

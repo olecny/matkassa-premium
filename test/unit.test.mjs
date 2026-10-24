@@ -6,6 +6,7 @@ import { buildProfile, scoreOffer, normEan, productKey } from '../js/profile.js'
 import { parseExtraOffers, mergeExtraOffers, eanCoverage } from '../js/extra-offers.js';
 import { normalizeOffer, AREAS, DEFAULT_AREA } from '../js/tjek.js';
 import { defaultSettings, mergeSettings, validArea } from '../js/settings.js';
+import { reconcile, hash, stable, pickSettings, cloudConfigured, Cloud } from '../js/cloud.js';
 
 let failed = 0;
 const ok = (c, m, d = '') => { console.log((c ? 'PASS ' : 'FAIL ') + m + (d && !c ? ` — ${d}` : '')); if (!c) { failed++; process.exitCode = 1; } };
@@ -159,6 +160,65 @@ ok(rb(100) < 100 && rb(400) - rb(300) < rb(100) - rb(0), 'sheet: dragging up rub
   const j = monthCompare([R('2026-12-31', 10), R('2027-01-03', 5), R('2026-12-02', 4)], '2027-01-03');
   ok(j.lastKey === '2026-12' && j.now === 5 && j.lastSoFar === 4 && j.lastAll === 14, 'hjem: January compares with December');
   ok(monthCompare([], '2026-10-24').now === 0 && monthCompare([{ total: 5 }, null], '2026-10-24').count === 0, 'hjem: empty and broken receipts');
+}
+
+/* ---------- cloud sync (Supabase): reconcile is pure ---------- */
+{
+  ok(stable({ b: 1, a: [2, { d: 1, c: 2 }] }) === stable({ a: [2, { c: 2, d: 1 }], b: 1 }) && hash({ a: 1 }) !== hash({ a: 2 }), 'cloud: stable hash ignores key order');
+  const A = { id: 'a', text: 'melk' }, B = { id: 'b', text: 'brød' }, C = { id: 'c', text: 'egg' };
+  // first login: nothing known, local A,B; account has B' and C → union, local B wins and is pushed, C added
+  let r = reconcile([A, B], {}, [{ id: 'b', data: { id: 'b', text: 'brød (konto)' } }, { id: 'c', data: C }]);
+  ok(r.next.map((x) => x.id).join() === 'a,b,c' && r.next[1].text === 'brød', 'cloud: first merge = union, this device wins on the same id');
+  ok(r.push.map((p) => p.id).sort().join() === 'a,b' && !r.push.some((p) => p.deleted), 'cloud: first merge pushes local items');
+  // replace: use the account's data
+  r = reconcile([A, B], {}, [{ id: 'c', data: C }], { replace: true });
+  ok(r.next.map((x) => x.id).join() === 'c' && !r.push.length, 'cloud: "use the account\'s data" drops local-only items, pushes nothing');
+  // steady state: known = synced hashes
+  const known = { a: hash(A), b: hash(B) };
+  r = reconcile([A, B], known, [{ id: 'a', data: { id: 'a', text: 'lettmelk' } }]);
+  ok(r.next[0].text === 'lettmelk' && !r.push.length, 'cloud: remote change applied when unchanged here');
+  r = reconcile([{ ...A, done: true }, B], known, [{ id: 'a', data: { id: 'a', text: 'lettmelk' } }]);
+  ok(r.next[0].done === true && r.push.length === 1 && r.push[0].id === 'a', 'cloud: changed on both → this device wins and is pushed');
+  r = reconcile([A], known, []);
+  ok(r.push.length === 1 && r.push[0].id === 'b' && r.push[0].deleted, 'cloud: local delete becomes a tombstone');
+  r = reconcile([A, B], known, [{ id: 'b', deleted: true, data: {} }]);
+  ok(r.next.map((x) => x.id).join() === 'a' && !('b' in r.known) && !r.push.length, 'cloud: remote tombstone removes an unchanged item');
+  r = reconcile([A, { ...B, text: 'rugbrød' }], known, [{ id: 'b', deleted: true, data: {} }]);
+  ok(r.next.length === 2 && r.push[0].id === 'b' && !r.push[0].deleted, 'cloud: edited here after a remote delete → kept and pushed');
+  r = reconcile([A, B], known, [{ id: 'x', data: null }, { id: 'y', data: 'junk' }]);
+  ok(r.next.length === 2, 'cloud: broken remote rows ignored');
+  ok(stable(pickSettings({ area: { name: 'X', lat: 1, lng: 2 }, chains: [], hiddenChains: ['k'], geo: 'done', sync: { token: 'FAKE-TOKEN', repo: 'x/y' } })) === stable({ area: { name: 'X', lat: 1, lng: 2 }, chains: [], hiddenChains: ['k'] }), 'cloud: only area/chains/hiddenChains leave the device (never the GitHub key)');
+  ok(!cloudConfigured({ url: '', anonKey: '' }) && !cloudConfigured({ url: 'https://evil.example.com', anonKey: 'x'.repeat(40) }) && cloudConfigured({ url: 'https://abcd-fake.supabase.co', anonKey: 'x'.repeat(40) }), 'cloud: config only counts for a *.supabase.co URL with a key');
+  const cfgSrc = fs.readFileSync(new URL('../js/cloud-config.js', import.meta.url), 'utf8');
+  ok(!/service_role['"]?\s*[:=]\s*['"][^'"]/.test(cfgSrc) && !/eyJ[A-Za-z0-9_-]{20,}\.eyJ[A-Za-z0-9_-]*InNlcnZpY2Vfcm9sZS/.test(cfgSrc), 'cloud: no service_role key in the config');
+}
+{
+  // REST client against a tiny fake: password login, refresh on expiry, pull paging, push chunks
+  const calls = [];
+  const res = (status, body) => ({ ok: status < 300, status, json: async () => body });
+  let sess = null;
+  const fakeFetch = async (url, o = {}) => {
+    calls.push({ url, method: o.method || 'GET', headers: o.headers || {}, body: o.body });
+    if (url.includes('/auth/v1/token?grant_type=password')) return JSON.parse(o.body).password === 'riktig-FAKE' ? res(200, { access_token: 'AT1', refresh_token: 'RT1', expires_in: 3600, user: { id: 'u1', email: 'a@fake.invalid' } }) : res(400, { error_description: 'Invalid login credentials' });
+    if (url.includes('grant_type=refresh_token')) return res(200, { access_token: 'AT2', refresh_token: 'RT2', expires_in: 3600 });
+    if (url.includes('/rest/v1/receipts?select')) { const off = Number(/offset=(\d+)/.exec(url)[1]); return res(200, off === 0 ? Array.from({ length: 1000 }, (_, i) => ({ id: 'r' + i })) : [{ id: 'last' }]); }
+    if (url.includes('/rest/v1/receipts?on_conflict')) return res(201, JSON.parse(o.body).map((r) => ({ id: r.id, updated_at: '2026-10-24T10:00:00Z' })));
+    return res(404, {});
+  };
+  const c = new Cloud({ config: { url: 'https://abcd-fake.supabase.co', anonKey: 'FAKE-anon' }, fetchImpl: fakeFetch, loadSession: async () => sess, saveSession: async (s) => { sess = s; } });
+  await c.init();
+  let err = '';
+  try { await c.signIn('a@fake.invalid', 'feil'); } catch (e) { err = e.message; }
+  ok(err === 'Feil e-post eller passord' && !c.user, 'cloud client: wrong password gives a Norwegian message');
+  await c.signIn('a@fake.invalid', 'riktig-FAKE');
+  ok(c.user.id === 'u1' && sess.refresh_token === 'RT1', 'cloud client: login stores the session (IndexedDB in the app)');
+  c.session.expires_at = Date.now() + 1000;
+  const rows = await c.pull('receipts', null);
+  ok(rows.length === 1001 && calls.some((x) => x.url.includes('refresh_token')) && calls.filter((x) => x.url.includes('/rest/')).every((x) => x.headers.Authorization === 'Bearer AT2' && x.headers.apikey === 'FAKE-anon'), 'cloud client: refreshes an expiring token, pages through 1000+ rows');
+  calls.length = 0;
+  await c.push('receipts', Array.from({ length: 450 }, (_, i) => ({ id: 'n' + i, data: { id: 'n' + i } })));
+  const posts = calls.filter((x) => x.method === 'POST');
+  ok(posts.length === 3 && JSON.parse(posts[0].body).every((r) => r.user_id === 'u1') && /merge-duplicates/.test(posts[0].headers.Prefer), 'cloud client: upserts in chunks of 200 with the user id');
 }
 
 console.log(failed ? `\n${failed} FAILED` : '\nAll unit tests passed');

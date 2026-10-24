@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { makeFakeSupabase, FAKE_SUPABASE_HOST, FAKE_ANON } from './fake-supabase.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FAKE = path.join(ROOT, 'test', 'fake');
@@ -52,10 +53,13 @@ const remaOffers = () => {
 };
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
 const ghRequests = [];
+const supa = makeFakeSupabase(); // FAKE Supabase (auth + REST), only reachable when cloudOn
+let cloudOn = false; // serve a (fake) Supabase config, so the app shows "Logg inn"
 const tjekAreas = []; // r_lat,r_lng of every Tjek catalog request, to see which area the app asked for
 
-function fakeResponse(url, headers, method = 'GET') {
+function fakeResponse(url, headers, method = 'GET', body = '') {
   const u = new URL(url);
+  if (u.hostname.endsWith('.supabase.co')) return supa.handle(url, method, headers, body) || { status: 404, type: 'application/json', body: '{}' };
   if (u.hostname === 'squid-api.tjek.com' && u.pathname === '/v2/catalogs' && !Number(u.searchParams.get('offset') || 0)) tjekAreas.push(`${u.searchParams.get('r_lat')},${u.searchParams.get('r_lng')}`);
   if (method === 'OPTIONS' && u.hostname === 'api.github.com') return { status: 204, type: 'text/plain', body: '' }; // CORS preflight
   if (u.hostname === 'squid-api.tjek.com' && !LIVE) {
@@ -92,6 +96,11 @@ const server = http.createServer(async (req, res) => {
   if (stallMs) await sleep(stallMs);
   let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
   if (p.endsWith('/')) p += 'index.html';
+  if (p === '/js/cloud-config.js' && cloudOn) {
+    res.writeHead(200, { 'Content-Type': 'text/javascript', 'Cache-Control': 'no-cache' });
+    res.end(`export const CLOUD = { url: 'https://${FAKE_SUPABASE_HOST}', anonKey: '${FAKE_ANON}' };`);
+    return;
+  }
   const f = path.join(ROOT, p);
   // Only serve the app itself: never data/, ingest/, test/ or dotfiles.
   if (!f.startsWith(ROOT + path.sep) || /\/(data|ingest|test|innsyn|screenshots|\.git)(\/|$)|\/\./.test(p) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) {
@@ -166,12 +175,12 @@ listeners.push(async (msg) => {
   }
   if (msg.method === 'Fetch.requestPaused') {
     const { requestId, request } = msg.params;
-    const fake = fakeResponse(request.url, request.headers || {}, request.method);
+    const fake = fakeResponse(request.url, request.headers || {}, request.method, request.postData || '');
     if (!fake) return send('Fetch.continueRequest', { requestId }, sid).catch(() => {});
     const body = Buffer.isBuffer(fake.body) ? fake.body : Buffer.from(fake.body);
     send('Fetch.fulfillRequest', {
       requestId, responseCode: fake.status,
-      responseHeaders: [{ name: 'Content-Type', value: fake.type }, { name: 'Access-Control-Allow-Origin', value: '*' }, { name: 'Access-Control-Allow-Headers', value: 'Authorization, Accept, X-GitHub-Api-Version' }, { name: 'Access-Control-Allow-Methods', value: 'GET, OPTIONS' }],
+      responseHeaders: [{ name: 'Content-Type', value: fake.type }, { name: 'Access-Control-Allow-Origin', value: '*' }, { name: 'Access-Control-Allow-Headers', value: 'Authorization, Accept, X-GitHub-Api-Version, apikey, Content-Type, Prefer, Range' }, { name: 'Access-Control-Allow-Methods', value: 'GET, POST, DELETE, OPTIONS' }],
       body: body.toString('base64'),
     }, sid).catch(() => {});
   }
@@ -514,10 +523,121 @@ async function motionTests() {
   await evaluate(`window.scrollTo(0, 0); return true;`);
 }
 
+/* ---------- account + sync against the FAKE Supabase ---------- */
+const A_EMAIL = 'ole-FAKE@example.invalid';
+const A_PW = 'riktig-passord-FAKE';
+const listTexts = () => evaluate(`return [...document.querySelectorAll('#list-items .item .name')].map(n => n.textContent);`);
+const kv = (key) => evaluate(`const db = await new Promise(r => { const q = indexedDB.open('${APP_DB}'); q.onsuccess = () => r(q.result); }); return await new Promise(r => { const q = db.transaction('kv').objectStore('kv').get('${key}'); q.onsuccess = () => r(q.result ?? null); });`);
+async function cloudTests() {
+  const A = supa.addUser(A_EMAIL, A_PW);
+  supa.seed('list_items', A.id, 'konto-1', { id: 'konto-1', text: 'kaffe fra kontoen', done: false, added: 1 });
+  supa.seed('receipts', A.id, 'konto-r1', { id: 'konto-r1', source: 'manual', store: 'KONTOBUTIKK (FAKE)', date: '2026-10-01', total: 99, lines: [] });
+  supa.seed('chain_connections', A.id, undefined, undefined, { chain: 'trumf', status: 'connected', connected_at: '2026-10-20T10:00:00Z', last_fetch_at: '2026-10-20T18:00:00Z', last_error: null, secret_id: 'FAKE-SECRET-ID' });
+  cloudOn = true;
+  try {
+    await inFreshContext('cloud', async () => {
+      await navigate(BASE + 'index.html#liste');
+      await waitFor(`document.querySelector('#list-form')`);
+      await evaluate(`document.querySelector('#list-input').value = 'melk lokal'; document.querySelector('#list-form').requestSubmit(); return true;`);
+      await tab('mer');
+      // a (fake) GitHub key on this device must never reach Supabase
+      await evaluate(`document.querySelector('#sync-repo').value = '${FAKE_REPO}'; document.querySelector('#sync-token').value = '${FAKE_TOKEN}'; document.querySelector('#sync-form').requestSubmit(); return true;`);
+      await waitFor(`/Synk: \\d+ nye/.test(document.querySelector('#toast').textContent)`);
+      await tab('mer');
+      check(await evaluate(`return !!document.querySelector('#account-card #login-form') && /Logg inn/.test(document.querySelector('#account-card').textContent);`), 'cloud: "Logg inn" shown when a Supabase config is present');
+      await a11yAudit('mer-konto');
+      await evaluate(`document.querySelector('#login-email').value = '${A_EMAIL}'; document.querySelector('#login-password').value = 'feil-FAKE'; document.querySelector('#login-form').requestSubmit(); return true;`);
+      check(await waitFor(`/Feil e-post eller passord/.test(document.querySelector('#toast').textContent)`, 5000), 'cloud: wrong password → clear Norwegian message');
+      await evaluate(`document.querySelector('#login-email').value = '${A_EMAIL}'; document.querySelector('#login-password').value = '${A_PW}'; document.querySelector('#login-form').requestSubmit(); return true;`);
+      check(await waitFor(`document.querySelector('#dlg-merge').open`, 8000), 'cloud: first login with data on both sides asks how to merge');
+      const mergeText = await evaluate(`return document.querySelector('#merge-text').textContent;`);
+      check(/kvitteringer/.test(mergeText) && /Kontoen har 1 kvittering og 1 vare\./.test(mergeText), 'cloud: merge dialog shows the counts on both sides', mergeText);
+      await shot('10-konto-sla-sammen');
+      await evaluate(`document.querySelector('#dlg-merge button[value="merge"]').click(); return true;`);
+      check(await waitFor(`/Synket med kontoen/.test(document.querySelector('#toast').textContent)`, 10000), 'cloud: merge + sync finishes');
+      await tab('liste');
+      const texts = await listTexts();
+      check(texts.includes('melk lokal') && texts.includes('kaffe fra kontoen'), 'cloud: merge keeps local and account items', texts.join(', '));
+      const rowsA = supa.tables.list_items.filter((r) => r.user_id === A.id && !r.deleted).map((r) => r.data.text);
+      check(rowsA.includes('melk lokal'), 'cloud: local item pushed to the user\'s own rows', rowsA.join(', '));
+      check(supa.tables.receipts.filter((r) => r.user_id === A.id).length > 1, 'cloud: local receipts pushed, account receipt kept');
+      const leaked = supa.log.filter((r) => r.body.includes(FAKE_TOKEN) || r.auth.includes(FAKE_TOKEN) || /"sync"/.test(r.body));
+      check(!leaked.length && supa.tables.settings.length === 1 && !JSON.stringify(supa.tables.settings).includes(FAKE_TOKEN), 'cloud: the GitHub key never reaches Supabase (settings = area/chains only)', leaked.map((r) => r.path).join(' '));
+      check(supa.log.every((r) => r.apikey === FAKE_ANON) && supa.log.filter((r) => r.path.startsWith('/rest/')).every((r) => /^Bearer FAKE-AT-/.test(r.auth)), 'cloud: anon key + the user\'s own JWT on every call (no service key)');
+      // a change here reaches the account a few seconds later
+      await evaluate(`const cb = [...document.querySelectorAll('#list-items .item')].find(li => /melk lokal/.test(li.textContent)).querySelector('[data-toggle]'); cb.click(); return true;`);
+      const pushed = await (async () => { const end = Date.now() + 9000; while (Date.now() < end) { const r = supa.tables.list_items.find((x) => x.data && x.data.text === 'melk lokal'); if (r && r.data.done) return true; await sleep(300); } return false; })();
+      check(pushed, 'cloud: checking off an item syncs on its own (debounced)');
+      // another device changes and deletes items → "Synk nå" brings it here
+      supa.remoteWrite('list_items', A.id, 'konto-1', { id: 'konto-1', text: 'kaffe (endret på mobilen)', done: false, added: 1 });
+      supa.remoteWrite('list_items', A.id, 'konto-2', { id: 'konto-2', text: 'egg fra mobilen', done: false, added: 2 });
+      await tab('mer');
+      await click('[data-action="cloud-sync"]');
+      await waitFor(`/Synket/.test(document.querySelector('#toast').textContent)`, 8000);
+      await tab('liste');
+      let t2 = await listTexts();
+      check(t2.includes('kaffe (endret på mobilen)') && t2.includes('egg fra mobilen'), 'cloud: changes from another device arrive', t2.join(', '));
+      supa.remoteWrite('list_items', A.id, 'konto-2', {}, true);
+      await tab('mer');
+      await click('[data-action="cloud-sync"]');
+      await sleep(1200);
+      await tab('liste');
+      t2 = await listTexts();
+      check(!t2.includes('egg fra mobilen'), 'cloud: a delete on another device arrives (tombstone)');
+      // deleting here becomes a tombstone there
+      await evaluate(`const li = [...document.querySelectorAll('#list-items .item')].find(li => /kaffe/.test(li.textContent)); li.querySelector('[data-del]').click(); return true;`);
+      const tomb = await (async () => { const end = Date.now() + 9000; while (Date.now() < end) { if (supa.tables.list_items.find((x) => x.id === 'konto-1').deleted) return true; await sleep(300); } return false; })();
+      check(tomb, 'cloud: deleting here marks it deleted in the account');
+      // chain connections: status only, "Koble fra" deletes it, "Koble til" explains honestly
+      await tab('mer');
+      await waitFor(`document.querySelector('[data-conn="trumf"]') && /Tilkoblet/.test(document.querySelector('[data-conn="trumf"]').textContent)`, 5000);
+      check(await evaluate(`return /Tilkoblet/.test(document.querySelector('[data-conn="trumf"]').textContent) && !!document.querySelector('[data-disconnect="trumf"]') && !!document.querySelector('[data-connect="rema"]');`), 'connect: Mer shows Trumf connected, REMA not');
+      check(!supa.log.some((r) => /chain_connections\?select=[^&]*secret/.test(r.path)), 'connect: the app never asks for the secret');
+      await click('[data-connect="rema"]');
+      check(await evaluate(`return document.querySelector('#dlg-connect').open && /reCAPTCHA/.test(document.querySelector('#connect-text').textContent);`), 'connect: "Koble til REMA" explains why it is done on the Mac (no bypassing reCAPTCHA)');
+      await evaluate(`document.querySelector('#dlg-connect button').click(); return true;`);
+      await click('[data-disconnect="trumf"]');
+      await sleep(500);
+      check(!supa.tables.chain_connections.some((r) => r.user_id === A.id && r.chain === 'trumf'), '"Koble fra" deletes the connection (and with it the stored token)');
+      await send('Emulation.setDeviceMetricsOverride', { width: 320, height: 568, deviceScaleFactor: 2, mobile: true }, S);
+      check(await noHScroll(), '320 px: Mer with account card has no sideways scroll');
+      await shot('11-konto-320');
+      await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true }, S);
+      await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] }, S);
+      await shot('12-konto-mork');
+      await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }, S);
+      // log out: local data stays, session gone
+      await click('[data-action="logout"]');
+      check(!(await kv('cloudSession')) && (await kv('list')).length > 0, 'cloud: log out removes the session, keeps local data');
+      check(await evaluate(`return !!document.querySelector('#login-form');`), 'cloud: login form back after logout');
+    });
+    // second device: fresh browser, same account → no question (nothing local), everything arrives
+    await inFreshContext('cloud device 2', async () => {
+      await navigate(BASE + 'index.html#mer');
+      await waitFor(`document.querySelector('#login-form')`);
+      await evaluate(`document.querySelector('#login-email').value = '${A_EMAIL}'; document.querySelector('#login-password').value = '${A_PW}'; document.querySelector('#login-form').requestSubmit(); return true;`);
+      check(await waitFor(`/Synket med kontoen/.test(document.querySelector('#toast').textContent)`, 10000), 'cloud device 2: login syncs without a merge question');
+      await tab('liste');
+      const t = await listTexts();
+      check(t.includes('melk lokal') && !t.some((x) => /kaffe/.test(x)), 'cloud device 2: gets the list as it is now (incl. deletes)', t.join(', '));
+    });
+    // magic link: the app picks the session up from the redirect
+    await inFreshContext('cloud magic link', async () => {
+      const s = supa.magicLinkToken(A_EMAIL);
+      await navigate(BASE + `index.html#access_token=${s.access_token}&expires_in=3600&refresh_token=${s.refresh_token}&token_type=bearer&type=magiclink`);
+      check(await waitFor(`location.hash === '#mer' && /Logget inn som/.test(document.querySelector('#account-card')?.textContent || '')`, 10000), 'cloud: magic-link redirect logs in and cleans the URL');
+      check(!(await evaluate(`return location.href;`)).includes('access_token'), 'cloud: no token left in the address bar');
+    });
+  } finally {
+    cloudOn = false;
+  }
+}
+
 /* ---------- the tests ---------- */
 try {
   await isolationTests();
   await locationTests();
+  await cloudTests();
   // The main run below starts as a user who said no to location (Trondheim), so it doesn't depend on Chrome's prompt.
   await send('Browser.setPermission', { permission: { name: 'geolocation' }, setting: 'denied', origin: ORIGIN });
 
@@ -548,6 +668,7 @@ try {
   check(await evaluate(`return /Ingen kvitteringer/.test(document.querySelector('#spend-body').textContent);`), 'forbruk: empty state');
   await tab('mer');
   check(await evaluate(`return document.querySelector('#sync-repo').value === '';`), 'mer: sync repo is empty by default (no personal default)');
+  check(await evaluate(`return !document.querySelector('#account-card') && !/Logg inn/.test(document.querySelector('#view-mer').textContent);`), 'mer: no "Logg inn" without a Supabase config (works fully without an account)');
   await a11yAudit('mer');
   await shot('02-mer-tom');
 
@@ -744,7 +865,7 @@ try {
   serverUp = true;
 
   // 12. No console errors (offline fetch failures and favicon are expected noise)
-  const errs = consoleErrors.filter((e) => !/ERR_INTERNET_DISCONNECTED|Failed to fetch|net::ERR_|Tjek-feil|status of 40[14]/.test(e));
+  const errs = consoleErrors.filter((e) => !/ERR_INTERNET_DISCONNECTED|Failed to fetch|net::ERR_|Tjek-feil|status of 40[14]|status of 400 \(Bad Request\) https:\/\/matkassa-fake\.supabase\.co\/auth\/v1\/token\?grant_type=password/.test(e));
   check(!errs.length, 'no unexpected console errors', errs.slice(0, 5).join(' | '));
   if (dialogs.length) warn('confirm()/alert() dialogs auto-accepted', dialogs.join(' | '));
 } catch (e) {

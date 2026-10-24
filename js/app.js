@@ -5,6 +5,7 @@ import { buildProfile, scoreOffer, normEan } from './profile.js';
 import { parseExtraOffers, mergeExtraOffers, eanCoverage } from './extra-offers.js';
 import { defaultSettings, mergeSettings, validArea } from './settings.js';
 import { detectImport, mergeReceipts, summarize, monthCompare, toNumber, UNCAT, BACKUP_SCHEMA } from './spending.js';
+import { Cloud, cloudConfigured, reconcile, pickSettings, hash, COLLECTIONS } from './cloud.js';
 import { enableSheetDrag, watchLargeTitle, moveTabIndicator, exitRow, flip } from './motion.js';
 
 const APP_VERSION = '0.5.0-premium.1';
@@ -48,12 +49,13 @@ let classify = makeClassifier(state.categories, state.rules);
 let offerIndex = []; // [{o, words, cat}]
 
 /* ---------- persistence ---------- */
+const synced = (p) => { scheduleCloudSync(); return p; }; // a local change goes to the account a few seconds later
 const save = {
-  list: () => db.set('list', state.list),
-  categories: () => db.set('categories', state.categories),
-  rules: () => db.set('rules', state.rules),
-  receipts: () => db.set('receipts', state.receipts),
-  settings: () => db.set('settings', state.settings),
+  list: () => synced(db.set('list', state.list)),
+  categories: () => synced(db.set('categories', state.categories)),
+  rules: () => synced(db.set('rules', state.rules)),
+  receipts: () => synced(db.set('receipts', state.receipts)),
+  settings: () => synced(db.set('settings', state.settings)),
 };
 
 function rebuildClassifier() {
@@ -954,7 +956,7 @@ async function copyFromOriginal() {
 function renderMore() {
   const rules = [...state.rules].sort((a, b) => (b.created || 0) - (a.created || 0));
   const d = state.offersData;
-  $('#more-body').innerHTML = `
+  $('#more-body').innerHTML = `${accountCard()}
     <div class="card"><h2>Synk fra Mac</h2>
       <p class="hint" style="margin-top:0">Valgfritt. Kvitteringene dine hentes fra ditt eget <strong>private</strong> GitHub-repo, som Mac-skriptet (<code>ingest/sync.sh</code>) oppdaterer. Nøkkelen lagres bare på denne enheten og tas aldri med i backup.</p>
       <form id="sync-form">
@@ -1009,6 +1011,179 @@ function renderMore() {
       <p class="hint" style="margin-top:0">Versjon ${APP_VERSION}. Tilbud hentes fra Tjek (motoren bak eTilbudsavis), et uoffisielt API, for området rundt ${esc(area().name)}. Kategorier for tilbud gjettes fra varenavnet. «Tilbud for deg» lærer bare av kvitteringene på denne enheten. Tjek-tilbud har ikke strekkoder, så de matches på navn; strekkodetreff (EAN) vises der begge sider har strekkode. Alt du legger inn lagres bare på denne enheten.</p>
       <p class="hint">Installer: åpne i Safari → Del → <strong>Legg til på Hjem-skjerm</strong>.</p>
     </div>`;
+}
+
+/* ---------- account + cloud sync (optional, Supabase) ---------- */
+const COLL = { receipts: 'receipts', list_items: 'list', categories: 'categories', rules: 'rules' };
+const CHAINS = [['trumf', 'Trumf', 'Kiwi, Meny, Spar, Joker'], ['rema', 'REMA 1000', 'Æ-appen'], ['coop', 'Coop', 'Coop-medlemskap']];
+const cloud = cloudConfigured()
+  ? new Cloud({ loadSession: () => db.get('cloudSession'), saveSession: (s) => (s ? db.set('cloudSession', s) : db.del('cloudSession')) })
+  : null;
+const cloudState = { busy: false, lastSync: null, error: null, connections: null };
+let cloudTimer;
+let cloudApplying = false; // saves made by the sync itself don't schedule another sync
+
+function scheduleCloudSync(ms = 4000) {
+  if (!cloud || !cloud.user || cloudApplying) return;
+  clearTimeout(cloudTimer);
+  cloudTimer = setTimeout(() => cloudSync({ quiet: true }), ms);
+}
+
+function askMerge(local, remote) {
+  const dlg = $('#dlg-merge');
+  const k = (n) => `${n} kvittering${n === 1 ? '' : 'er'}`;
+  const v = (n) => `${n} vare${n === 1 ? '' : 'r'}`;
+  $('#merge-text').textContent = `Denne enheten har ${k(local.receipts)} og ${v(local.list)} i handlelisten. Kontoen har ${k(remote.receipts)} og ${v(remote.list)}.`;
+  dlg.returnValue = '';
+  dlg.showModal();
+  return new Promise((r) => dlg.addEventListener('close', () => r(dlg.returnValue || 'cancel'), { once: true }));
+}
+
+async function cloudSync({ quiet = false } = {}) {
+  if (!cloud || !cloud.user || cloudState.busy) return;
+  if (!navigator.onLine) { cloudState.error = 'Frakoblet – synker når nettet er tilbake'; if (state.tab === 'mer') renderMore(); return; }
+  cloudState.busy = true;
+  if (state.tab === 'mer') renderMore();
+  try {
+    let meta = await db.get('cloudMeta');
+    if (!meta || meta.userId !== cloud.user.id) meta = { userId: cloud.user.id, lastPull: {}, known: {}, settings: null, first: true };
+    const pulled = {};
+    for (const t of COLLECTIONS) pulled[t] = await cloud.pull(t, meta.lastPull[t] || null);
+    const remoteSettings = await cloud.pullSettings();
+    let replace = false;
+    if (meta.first) {
+      const live = (t) => pulled[t].filter((r) => !r.deleted).length;
+      const local = { receipts: state.receipts.length, list: state.list.length };
+      const remote = { receipts: live('receipts'), list: live('list_items') };
+      if ((local.receipts || local.list || state.rules.length) && (remote.receipts || remote.list || live('rules'))) {
+        const choice = await askMerge(local, remote);
+        if (choice === 'cancel') { cloudState.error = 'Synk avbrutt – ingenting er endret'; return; }
+        replace = choice === 'account';
+      }
+    }
+    cloudApplying = true;
+    const changed = [];
+    const pushes = {};
+    for (const t of COLLECTIONS) {
+      const key = COLL[t];
+      const r = reconcile(state[key], meta.known[t], pulled[t], { replace });
+      if (key === 'categories' && !r.next.length) r.next = DEFAULT_CATEGORIES.map((c) => ({ ...c }));
+      if (hash(r.next) !== hash(state[key])) { state[key] = r.next; changed.push(key); }
+      meta.known[t] = r.known;
+      pushes[t] = r;
+      for (const row of pulled[t]) if (!meta.lastPull[t] || row.updated_at > meta.lastPull[t]) meta.lastPull[t] = row.updated_at;
+    }
+    // settings (area, chains): the account's version wins on a first login and whenever they weren't changed here
+    if (remoteSettings && (meta.first || hash(pickSettings(state.settings)) === meta.settings)) {
+      state.settings = mergeSettings(state.settings, remoteSettings.data, { fromBackup: true }); // never touches sync/geo
+      meta.settings = hash(pickSettings(state.settings));
+      changed.push('settings');
+    }
+    for (const key of changed) await save[key]();
+    if (changed.length) { rebuildClassifier(); render(); }
+    cloudApplying = false;
+    for (const t of COLLECTIONS) {
+      const r = pushes[t];
+      if (!r.push.length) continue;
+      await cloud.push(t, r.push);
+      for (const p of r.push) { if (p.deleted) delete meta.known[t][p.id]; else meta.known[t][p.id] = r.pushedHashes[p.id]; }
+    }
+    const now = hash(pickSettings(state.settings));
+    if (!remoteSettings || now !== meta.settings) { await cloud.pushSettings(state.settings); meta.settings = now; }
+    meta.first = false;
+    await db.set('cloudMeta', meta);
+    cloudState.lastSync = Date.now();
+    cloudState.error = null;
+    if (!quiet) toast('Synket med kontoen');
+    cloud.connections().then((c) => { cloudState.connections = c; if (state.tab === 'mer') renderMore(); }).catch(() => {});
+  } catch (e) {
+    cloudState.error = e.message;
+    if (!quiet) toast(e.message);
+  } finally {
+    cloudApplying = false;
+    cloudState.busy = false;
+    if (state.tab === 'mer') renderMore();
+  }
+}
+
+function accountCard() {
+  if (!cloud) return '';
+  if (!cloud.user) {
+    return `<div class="card" id="account-card"><h2>Konto</h2>
+      <p class="hint" style="margin-top:0">Valgfritt. Med konto synkes kvitteringer, handleliste, kategorier og regler mellom enhetene dine. Uten konto virker alt som før, bare på denne enheten.</p>
+      <form id="login-form">
+        <label class="field"><span>E-post</span><input id="login-email" type="email" autocomplete="username" autocapitalize="off" spellcheck="false" required></label>
+        <label class="field"><span>Passord</span><input id="login-password" type="password" autocomplete="current-password"></label>
+        <div class="actions" style="margin-top:8px">
+          <button class="btn btn-primary" type="submit">Logg inn</button>
+          <button class="btn" type="button" data-action="signup">Opprett konto</button>
+          <button class="btn btn-ghost" type="button" data-action="magic">Send innloggingslenke</button>
+        </div>
+      </form>
+      ${cloudState.error ? `<p class="hint" role="alert">${esc(cloudState.error)}</p>` : ''}
+    </div>`;
+  }
+  const conn = new Map((cloudState.connections || []).map((c) => [c.chain, c]));
+  return `<div class="card" id="account-card"><h2>Konto</h2>
+    <dl class="kv">
+      <dt>Logget inn som</dt><dd>${esc(cloud.user.email)}</dd>
+      <dt>Sist synket</dt><dd>${cloudState.busy ? 'Synker …' : cloudState.lastSync ? timeFmt.format(cloudState.lastSync) : 'ikke ennå'}</dd>
+      ${cloudState.error ? `<dt>Feil</dt><dd>${esc(cloudState.error)}</dd>` : ''}
+    </dl>
+    <div class="actions" style="margin-top:8px">
+      <button class="btn" type="button" data-action="cloud-sync"${cloudState.busy ? ' aria-busy="true"' : ''}>Synk nå</button>
+      <button class="btn btn-ghost" type="button" data-action="logout">Logg ut</button>
+    </div>
+    <h3 class="sub">Kvitteringer fra kjedene</h3>
+    <ul class="conns">${CHAINS.map(([id, name, what]) => {
+      const c = conn.get(id);
+      return `<li data-conn="${id}"><span><b>${esc(name)}</b><small>${c ? `${c.status === 'connected' ? 'Tilkoblet' : c.status === 'expired' ? 'Utløpt – koble til på nytt' : 'Feiler'}${c.last_fetch_at ? ` · hentet ${esc(timeFmt.format(new Date(c.last_fetch_at)))}` : ''}` : esc(what)}</small></span>
+        ${c ? `<button class="btn small btn-ghost" type="button" data-disconnect="${id}">Koble fra</button>` : `<button class="btn small" type="button" data-connect="${id}">Koble til</button>`}</li>`;
+    }).join('')}</ul>
+    <div class="actions" style="margin-top:12px"><button class="btn btn-danger btn-ghost" type="button" data-action="cloud-wipe">Slett dataene mine i skyen</button></div>
+  </div>`;
+}
+
+const CONNECT_HELP = {
+  trumf: 'Trumf kan ikke kobles til inne i appen: innloggingen (telefon, passord og SMS-kode) skjer bare på trumf.no, og Trumf har ingen innlogging for andre apper. Gjør det i stedet én gang på Mac-en: kjør «node ingest/trumf-login.mjs», logg inn hos Trumf i vinduet som åpnes, og lukk det. Deretter hentes kvitteringene hver søndag.',
+  rema: 'REMA kan ikke kobles til inne i appen: Æ-innloggingen er beskyttet med reCAPTCHA og sender deg bare tilbake til REMAs egen app, og det skal vi ikke omgå. Gjør det i stedet én gang på Mac-en: kjør «rema1000 login» og logg inn selv. Deretter hentes kvitteringene hver søndag.',
+  coop: 'Coop har ingen åpen eller dokumentert måte å hente egne kvitteringer på. Bestill innsyn i stedet: coop.no → Min side → Bestill innsyn. Når du får fila (JSON eller CSV), importer den under Forbruk → Importer fil.',
+};
+
+async function accountAction(act, btn) {
+  const email = () => ($('#login-email') ? $('#login-email').value.trim() : '');
+  const pw = () => ($('#login-password') ? $('#login-password').value : '');
+  try {
+    if (act === 'signup') {
+      if (!email() || pw().length < 8) { toast('Skriv e-post og et passord på minst 8 tegn'); return; }
+      const s = await cloud.signUp(email(), pw());
+      if (!s) { toast('Sjekk e-posten din og trykk på lenken for å bekrefte kontoen'); return; }
+      toast('Konto opprettet');
+      await cloudSync();
+    }
+    if (act === 'magic') {
+      if (!email()) { toast('Skriv e-postadressen din først'); return; }
+      await cloud.sendMagicLink(email(), location.origin + location.pathname);
+      toast('Innloggingslenke sendt – åpne den på denne enheten');
+    }
+    if (act === 'logout') {
+      await cloud.signOut();
+      cloudState.connections = null;
+      cloudState.lastSync = null;
+      toast('Logget ut. Dataene ligger fortsatt på denne enheten.');
+    }
+    if (act === 'cloud-sync') await cloudSync();
+    if (act === 'cloud-wipe' && confirm('Slette alle dataene dine i skyen (kvitteringer, liste, kategorier, regler, innstillinger og kjedetilkoblinger)? Dataene på denne enheten beholdes. Kontoen slettes helt ved å be om det (se personvern).')) {
+      await cloud.wipe();
+      await db.del('cloudMeta');
+      await cloud.signOut();
+      toast('Dataene dine i skyen er slettet, og du er logget ut');
+    }
+  } catch (e) {
+    cloudState.error = e.message;
+    toast(e.message);
+  }
+  renderMore();
 }
 
 function setArea(a) {
@@ -1212,6 +1387,7 @@ function bind() {
       save.settings();
       renderMore();
     }
+    if (['signup', 'magic', 'logout', 'cloud-sync', 'cloud-wipe'].includes(act) && cloud) accountAction(act, a);
     if (act === 'wipe-spending' && confirm('Slette alle kvitteringer på denne enheten? Kategorier og regler beholdes. Ta gjerne backup først.')) {
       state.receipts = [];
       save.receipts();
@@ -1311,7 +1487,27 @@ function bind() {
       save.rules(); rebuildClassifier(); renderMore();
     }
   });
+  $('#view-mer').addEventListener('click', async (e) => {
+    const c = e.target.closest('[data-connect]');
+    if (c) { $('#connect-text').textContent = CONNECT_HELP[c.dataset.connect]; $('#dlg-connect').showModal(); return; }
+    const d = e.target.closest('[data-disconnect]');
+    if (d && cloud && confirm('Koble fra? Den lagrede innloggingen hos kjeden slettes fra serveren, og kvitteringer hentes ikke lenger automatisk. Kvitteringene du alt har, beholdes.')) {
+      try { await cloud.disconnect(d.dataset.disconnect); cloudState.connections = (cloudState.connections || []).filter((x) => x.chain !== d.dataset.disconnect); toast('Koblet fra'); } catch (err) { toast(err.message); }
+      renderMore();
+    }
+  });
   $('#view-mer').addEventListener('submit', async (e) => {
+    if (e.target.id === 'login-form') {
+      e.preventDefault();
+      try {
+        await cloud.signIn($('#login-email').value.trim(), $('#login-password').value);
+        cloudState.error = null;
+        toast(`Logget inn som ${cloud.user.email}`);
+        renderMore();
+        await cloudSync();
+      } catch (err) { cloudState.error = err.message; toast(err.message); renderMore(); }
+      return;
+    }
     if (e.target.id === 'sync-form') {
       e.preventDefault();
       const s = state.settings.sync;
@@ -1335,13 +1531,14 @@ function bind() {
     save.categories(); rebuildClassifier(); renderMore();
   });
 
-  window.addEventListener('online', () => { state.error = null; loadOffers(); });
+  window.addEventListener('online', () => { state.error = null; loadOffers(); scheduleCloudSync(500); });
   window.addEventListener('offline', () => { state.error = 'Frakoblet'; renderStatus(); });
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { if (!$('#toast').hidden) clearTimeout(toastTimer); return; }
     if (!$('#toast').hidden) { clearTimeout(toastTimer); toastTimer = setTimeout(hideToast, TOAST_MS); }
     loadOffers();
     if (syncDue()) syncSpending({ quiet: true });
+    if (cloud && cloud.user && Date.now() - (cloudState.lastSync || 0) > 5 * 60 * 1000) cloudSync({ quiet: true });
   });
 }
 
@@ -1364,13 +1561,22 @@ async function start() {
     state.error = 'Lagring er ikke tilgjengelig i denne nettleseren';
   }
   rebuildClassifier();
-  const hash = location.hash.slice(1);
-  showTab(TABS.includes(hash) ? hash : 'hjem');
+  let tabHash = location.hash.slice(1);
+  if (cloud) {
+    await cloud.init().catch(() => null);
+    if (/access_token=|error_description=/.test(tabHash)) { // back from a magic link
+      try { await cloud.fromRedirect(tabHash); toast(`Logget inn som ${cloud.user.email}`); } catch (e) { cloudState.error = e.message; toast(e.message); }
+      tabHash = 'mer';
+      try { history.replaceState(null, '', location.pathname + '#mer'); } catch (e) { /* file:// */ }
+    }
+  }
+  showTab(TABS.includes(tabHash) ? tabHash : 'hjem');
   db.persist().then((p) => (state.persisted = p));
   originalExists().then((v) => { state.originalExists = v; if (v && state.tab === 'mer') renderMore(); });
   loadOffers();
   firstRunLocation();
   if (syncDue()) syncSpending({ quiet: true });
+  if (cloud && cloud.user) cloudSync({ quiet: true });
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     const hadController = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) location.reload(); });
