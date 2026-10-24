@@ -240,11 +240,15 @@ async function a11yAudit(where) {
     }
     out.imgsNoAlt = [...document.images].filter((i) => !i.hasAttribute('alt')).length;
     out.lang = document.documentElement.lang;
+    // iOS zooms into any field under 16 px; check every field, also those in closed sheets
+    out.small = [...document.querySelectorAll('input:not([type=hidden]):not([type=file]):not([type=checkbox]):not([type=color]), select, textarea')]
+      .filter((i) => parseFloat(getComputedStyle(i).fontSize) < 16).map((i) => (i.id || i.name || i.className) + ' ' + getComputedStyle(i).fontSize);
     return out;`);
   check(!r.unnamedButtons.length, `a11y ${where}: every button has a name`, r.unnamedButtons.join(' | '));
   check(!r.unlabelledInputs.length, `a11y ${where}: every input has a label`, r.unlabelledInputs.join(' | '));
   check(r.imgsNoAlt === 0, `a11y ${where}: images have alt`);
   check(r.lang === 'nb' || r.lang === 'no', `a11y ${where}: <html lang> is Norwegian`, r.lang);
+  check(!r.small.length, `mobile ${where}: every input/select/textarea ≥ 16 px (no iOS zoom)`, r.small.join(' | '));
   if (r.smallTargets.length) warn(`a11y ${where}: tap targets under 44px`, [...new Set(r.smallTargets)].slice(0, 6).join(' | '));
 }
 
@@ -465,7 +469,7 @@ async function motionTests() {
   const g = await evaluate(`const r = document.querySelector('#dlg-receipt .grabber').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, open: document.querySelector('#dlg-receipt').open, tf: getComputedStyle(document.querySelector('#dlg-receipt')).transform };`);
   check(g.open && (g.tf === 'none' || /matrix\(1, 0, 0, 1, 0, 0\)/.test(g.tf)), 'sheet: opens and settles at rest', g.tf);
   await shot('10-sheet-open');
-  await touchDrag(g.x, g.y, g.y + 40, 8, 40); // slow, short: stays
+  await touchDrag(g.x, g.y, g.y + 40, 8, 60); // slow, short (≈ 0.08 px/ms over the last 100 ms): stays
   await sleep(600);
   check(await evaluate(`return document.querySelector('#dlg-receipt').open;`), 'sheet: a short slow drag snaps back (stays open)');
   await touchDrag(g.x, g.y, g.y + 160, 4, 8); // a flick: closes
@@ -479,6 +483,23 @@ async function motionTests() {
   check((rm.tf === 'none') && !/transform/.test(rm.tp) && /opacity/.test(rm.tp), 'reduced motion: sheet cross-fades, no slide', JSON.stringify(rm));
   await evaluate(`document.querySelector('#dlg-receipt').close(); return true;`);
   await sleep(300);
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }, S);
+
+  // M4b. Check-off: the tick shows at once, then the row glides to the bottom (FLIP), not a jump; no glide with reduced motion.
+  await tab('liste');
+  const flipRun = async () => evaluate(`const first = document.querySelector('#list-items .item:not(.done) input[type=checkbox]');
+    if (!first || document.querySelectorAll('#list-items .item').length < 2) return { skip: true };
+    const id = first.dataset.toggle; first.click();
+    await new Promise((r) => setTimeout(r, 720));
+    const moved = [...document.querySelectorAll('#list-items .item')].some((li) => li.getAnimations().some((a) => /translateY/.test(JSON.stringify(a.effect.getKeyframes()))));
+    await new Promise((r) => setTimeout(r, 400));
+    document.querySelector('[data-toggle="' + id + '"]').click(); await new Promise((r) => setTimeout(r, 1100));
+    return { moved };`);
+  const fl = await flipRun();
+  check(fl.skip || fl.moved, 'motion: checked row glides to its new place (FLIP)', JSON.stringify(fl));
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }, { name: 'prefers-reduced-motion', value: 'reduce' }] }, S);
+  const flr = await flipRun();
+  check(flr.skip || !flr.moved, 'reduced motion: checked row moves without gliding', JSON.stringify(flr));
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }, S);
 
   // M5. Scroll edge: the hairline and compact title appear only once the large title is under the bar.

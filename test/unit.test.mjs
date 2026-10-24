@@ -141,6 +141,11 @@ const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 ok(/viewport-fit=cover/.test(html) && !/user-scalable=no|maximum-scale=1/.test(html), 'mobile: safe areas on, zoom never disabled');
 const motion = await import('../js/motion.js');
 ok(motion.shouldDismiss(60, 0.5, 600) && !motion.shouldDismiss(60, 0.05, 600) && motion.shouldDismiss(260, 0.01, 600) && !motion.shouldDismiss(-40, 1, 600), 'sheet: a flick (> 0.11 px/ms) or a third of the height closes; up never closes');
+const S = (pts) => pts.map(([t, y]) => ({ t, y }));
+ok(Math.abs(motion.releaseVelocity(S([[0, 0], [60, 5], [120, 10], [180, 15], [240, 20]]), 250) - 5 / 60) < 1e-9, 'sheet velocity: averaged over the last 100 ms (slow drag ≈ 0.083 px/ms, below the flick threshold)');
+ok(motion.releaseVelocity(S([[0, 0], [8, 40], [16, 80]]), 200) === 0, 'sheet velocity: zero when the finger stopped > 80 ms before lifting');
+ok(motion.releaseVelocity(S([[0, 0], [100, 2], [104, 8]]), 105) < 0.11, 'sheet velocity: one jittery event does not make a flick');
+ok(motion.releaseVelocity(S([[0, 0], [8, 40], [16, 80], [24, 120]]), 26) > 1, 'sheet velocity: a real flick is fast');
 const rb = (x) => motion.rubberband(x, 600);
 ok(rb(100) < 100 && rb(400) - rb(300) < rb(100) - rb(0), 'sheet: dragging up rubber-bands (resistance grows)');
 

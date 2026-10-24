@@ -5,7 +5,7 @@ import { buildProfile, scoreOffer, normEan } from './profile.js';
 import { parseExtraOffers, mergeExtraOffers, eanCoverage } from './extra-offers.js';
 import { defaultSettings, mergeSettings, validArea } from './settings.js';
 import { detectImport, mergeReceipts, summarize, toNumber, UNCAT, BACKUP_SCHEMA } from './spending.js';
-import { enableSheetDrag, watchLargeTitle, moveTabIndicator, exitRow } from './motion.js';
+import { enableSheetDrag, watchLargeTitle, moveTabIndicator, exitRow, flip } from './motion.js';
 
 const APP_VERSION = '0.5.0-premium.1';
 const STALE_MS = 6 * 60 * 60 * 1000;
@@ -1092,7 +1092,7 @@ function bind() {
     e.target.closest('.item').classList.toggle('done', it.done);
     renderBadge();
     clearTimeout(resortTimer);
-    resortTimer = setTimeout(() => { if (state.tab === 'liste') renderList(); }, 650);
+    resortTimer = setTimeout(() => { if (state.tab === 'liste') flip($('#list-items'), renderList); }, 650);
   });
   $('#list-items').addEventListener('click', async (e) => {
     const del = e.target.closest('[data-del]');

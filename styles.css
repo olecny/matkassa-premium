@@ -189,7 +189,8 @@ main { max-width: 720px; margin: 0 auto; padding: 8px var(--gutter) 0; }
 }
 
 /* ---------- Tilbud: search, sort, chips ---------- */
-.toolbar { display: flex; gap: 8px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; }
+.toolbar .search { flex: 1 1 170px; }
 .search {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; min-height: 44px;
   background: var(--fill); border-radius: var(--r-control); padding: 0 12px;
@@ -201,8 +202,8 @@ main { max-width: 720px; margin: 0 auto; padding: 8px var(--gutter) 0; }
 .sort { flex: none; }
 .sort select {
   -webkit-appearance: none; appearance: none;
-  min-height: 44px; max-width: 132px; border-radius: var(--r-control); border: 0; background: var(--fill);
-  padding: 0 28px 0 12px; font-size: .9375rem; font-weight: 600; color: var(--accent);
+  min-height: 44px; max-width: 190px; border-radius: var(--r-control); border: 0; background: var(--fill);
+  padding: 0 28px 0 12px; font-size: 16px; /* < 16 px: iOS zooms on focus */ font-weight: 600; color: var(--accent);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 8px center; background-size: 14px;
   text-overflow: ellipsis;
@@ -471,7 +472,10 @@ dialog textarea { line-height: 1.4; resize: vertical; }
 dialog label.check { display: flex; align-items: center; gap: 10px; font-weight: 500; }
 dialog label.check input { width: 22px; height: 22px; accent-color: var(--accent); }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.dlg-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px; }
+.dlg-actions {
+  display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px;
+  position: sticky; bottom: 0; background: var(--surface); padding: 10px 0; /* Slett/Lukk stay reachable with large text */
+}
 .dlg-actions .btn { flex: 1; }
 .form-error { color: var(--danger); margin: 0; font-size: .8125rem; min-height: 0; }
 .rule-item { margin: 0; color: var(--text-2); }
@@ -537,7 +541,6 @@ dialog label.check input { width: 22px; height: 22px; accent-color: var(--accent
 /* ---------- Narrow phones (320 px): search + sort on one line, no sideways scroll ---------- */
 @media (max-width: 360px) {
   :root { --gutter: 12px; }
-  .sort select { max-width: 104px; }
   .search { padding: 0 8px; gap: 4px; }
   .offer { grid-template-columns: 56px minmax(0, 1fr) auto; gap: 10px; padding: 10px; }
   .offer .thumb { width: 56px; height: 56px; }
