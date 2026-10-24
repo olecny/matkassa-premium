@@ -7,7 +7,7 @@ pass() { echo "PASS $1"; }
 bad() { echo "FAIL $1"; [ -n "${2:-}" ] && echo "$2" | head -5 | sed 's/^/     /'; fail=1; }
 
 # 1. Only app code, docs and FAKE fixtures are tracked.
-odd="$(git ls-files | grep -vE '^(index\.html|styles\.css|sw\.js|manifest\.webmanifest|README\.md|plan\.md|\.gitignore|js/[a-z-]+\.js|icons/.*|ingest/(rema\.py|sync\.sh|README\.md|\.env\.example|launchd/(install|uninstall|run-sync)\.sh|launchd/matkassa-weekly-sync\.plist\.template)|test/(unit\.test\.mjs|e2e\.mjs|privacy\.sh|fake/[a-z-]+-FAKE\.json))$')"
+odd="$(git ls-files | grep -vE '^(index\.html|styles\.css|sw\.js|manifest\.webmanifest|README\.md|DESIGN\.md|\.gitignore|js/[a-z-]+\.js|icons/.*|test/(unit\.test\.mjs|e2e\.mjs|privacy\.sh|fake/[a-z-]+-FAKE\.json))$')"
 [ -z "$odd" ] && pass "git ls-files: only app code, docs and FAKE fixtures" || bad "unexpected tracked files" "$odd"
 
 # 2. Nothing sensitive is tracked, even if git-ignore rules change later.
@@ -32,7 +32,7 @@ eans="$(git grep -nIhoE '"ean[s]?"\s*:\s*\[?\s*"[0-9]{8,14}"' -- test/fake | gre
 [ -z "$eans" ] && pass "fixtures only use fake 2xx EANs" || bad "real-looking EANs in fixtures" "$eans"
 
 # 5. No hard-wired personal defaults in shipped code.
-own="$(git grep -nIi 'olecny\|/Users/' -- js sw.js index.html ingest/sync.sh ingest/rema.py ingest/launchd)"
+own="$(git grep -nIi 'olecny\|/Users/' -- js sw.js index.html manifest.webmanifest)"
 [ -z "$own" ] && pass "no personal repo/user hard-wired in shipped code" || bad "personal defaults in code" "$own"
 
 exit $fail

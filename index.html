@@ -2,16 +2,16 @@
 <html lang="nb">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Matkassa</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <title>Matkassa Premium</title>
   <meta name="description" content="Ukens mattilbud, handleliste og matforbruk.">
-  <meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#161615" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f2f2ef" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
   <meta name="color-scheme" content="light dark">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="Matkassa">
+  <meta name="apple-mobile-web-app-title" content="Matkassa+">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -19,15 +19,18 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header class="topbar">
+  <header class="topbar" id="topbar">
     <div class="topbar-row">
-      <h1 id="view-title">Tilbud</h1>
+      <span class="bar-title" id="bar-title" aria-hidden="true">Tilbud</span>
       <button id="refresh" class="icon-btn" type="button" aria-label="Oppdater tilbud" title="Oppdater tilbud">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>
       </button>
     </div>
-    <p id="status" class="status" role="status" aria-live="polite"></p>
   </header>
+  <div class="large-title" id="large-title">
+    <h1 id="view-title">Tilbud</h1>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+  </div>
 
   <main>
     <!-- Tilbud -->
@@ -111,11 +114,13 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
       <span>Mer</span>
     </button>
+    <span class="tab-indicator" id="tab-indicator" aria-hidden="true"></span>
   </nav>
 
   <input id="file-input" type="file" accept=".json,application/json" hidden>
 
   <dialog id="dlg-receipt" class="sheet">
+    <div class="grabber" aria-hidden="true"></div>
     <form method="dialog" id="receipt-form">
       <h2>Legg inn kvittering</h2>
       <label>Butikk
@@ -142,6 +147,7 @@
   </dialog>
 
   <dialog id="dlg-rule" class="sheet">
+    <div class="grabber" aria-hidden="true"></div>
     <form method="dialog" id="rule-form">
       <h2>Velg kategori</h2>
       <p id="rule-item" class="rule-item"></p>
@@ -157,6 +163,7 @@
   </dialog>
 
   <dialog id="dlg-detail" class="sheet">
+    <div class="grabber" aria-hidden="true"></div>
     <div id="detail-body"></div>
   </dialog>
 

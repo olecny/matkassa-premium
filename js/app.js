@@ -5,8 +5,9 @@ import { buildProfile, scoreOffer, normEan } from './profile.js';
 import { parseExtraOffers, mergeExtraOffers, eanCoverage } from './extra-offers.js';
 import { defaultSettings, mergeSettings, validArea } from './settings.js';
 import { detectImport, mergeReceipts, summarize, toNumber, UNCAT, BACKUP_SCHEMA } from './spending.js';
+import { enableSheetDrag, watchLargeTitle, moveTabIndicator, exitRow } from './motion.js';
 
-const APP_VERSION = '0.5.0';
+const APP_VERSION = '0.5.0-premium.1';
 const STALE_MS = 6 * 60 * 60 * 1000;
 const PAGE = 60;
 
@@ -39,6 +40,7 @@ const state = {
   loading: false,
   error: null,
   persisted: null,
+  originalExists: false, // the original Matkassa has data in this browser (same origin)
 };
 
 let classify = makeClassifier(state.categories, state.rules);
@@ -143,13 +145,25 @@ function featuredOffers(n = 10) {
 }
 
 /* ---------- toast ---------- */
+// Enters from below and leaves the same way (styles.css .toast). The timer pauses while the app is hidden, so a
+// message isn't missed when the user switches away right after an action.
+const TOAST_MS = 2600;
 let toastTimer;
 function toast(msg) {
   const t = $('#toast');
   t.textContent = msg;
+  t.classList.remove('leaving');
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.hidden = true), 2600);
+  toastTimer = setTimeout(hideToast, TOAST_MS);
+}
+function hideToast() {
+  const t = $('#toast');
+  if (t.hidden) return;
+  t.classList.add('leaving');
+  const done = () => { if (t.classList.contains('leaving')) { t.hidden = true; t.classList.remove('leaving'); } };
+  t.addEventListener('transitionend', done, { once: true });
+  setTimeout(done, 450); // reduced motion or no transition: still hide
 }
 
 /* ---------- tabs ---------- */
@@ -160,7 +174,8 @@ function showTab(tab) {
     if (b.dataset.tab === tab) b.setAttribute('aria-current', 'page');
     else b.removeAttribute('aria-current');
   }
-  $('#view-title').textContent = $(`#view-${tab}`).dataset.title;
+  $('#view-title').textContent = $('#bar-title').textContent = $(`#view-${tab}`).dataset.title;
+  moveTabIndicator($('#tab-indicator'), ['tilbud', 'liste', 'forbruk', 'mer'].indexOf(tab));
   $('#refresh').hidden = tab !== 'tilbud' && tab !== 'liste';
   render();
   window.scrollTo(0, 0);
@@ -308,7 +323,8 @@ function offerCard({ o, fit, because, via }) {
       <span class="price">${kr(o.price)}</span>
       ${o.prePrice && o.prePrice > o.price ? `<span class="pre">${kr(o.prePrice)}</span>` : ''}
       ${o.unitPrice ? `<span class="unit">${unitText(o)}</span>` : ''}
-      <button class="add${added ? ' added' : ''}" type="button" data-add="${esc(o.id)}" aria-label="${added ? 'Ligger i handlelisten' : 'Legg til i handlelisten'}: ${esc(o.title)}">${added ? '✓' : '+'}</button>
+      ${discount(o) >= 0.05 ? `<span class="off">−${Math.round(discount(o) * 100)} %</span>` : ''}
+      <button class="add${added ? ' added' : ''}" type="button" data-add="${esc(o.id)}" aria-label="${added ? 'Ligger i handlelisten' : 'Legg til i handlelisten'}: ${esc(o.title)}"><svg class="i-plus" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><svg class="i-check" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
     </div>
   </li>`;
 }
@@ -321,7 +337,7 @@ function featCard({ o, because, via }) {
     <div class="fp">${kr(o.price)}${o.prePrice && o.prePrice > o.price ? ` <s>${kr(o.prePrice)}</s>` : ''}</div>
     <div class="meta"><span class="chain" style="--c:${esc(chainColor(o.chainId, o.color))}">${esc(o.chain)}</span></div>
     <div class="why">${esc(because.name)} · ${because.n}×${via === 'ean' ? ' <span class="via" title="Samme strekkode som på kvitteringene dine">strekkode</span>' : ''}</div>
-    <button class="add${added ? ' added' : ''}" type="button" data-add="${esc(o.id)}" aria-label="${added ? 'Ligger i handlelisten' : 'Legg til i handlelisten'}: ${esc(o.title)}">${added ? '✓' : '+'}</button>
+    <button class="add${added ? ' added' : ''}" type="button" data-add="${esc(o.id)}" aria-label="${added ? 'Ligger i handlelisten' : 'Legg til i handlelisten'}: ${esc(o.title)}"><svg class="i-plus" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><svg class="i-check" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
   </li>`;
 }
 
@@ -419,11 +435,24 @@ function titleScore(q, x) {
   return score;
 }
 
+/** Update every + button for this offer in place (list and "Tilbud for deg"), so the + → ✓ change can animate. */
+function syncAddButtons(o) {
+  const added = inList(o.id);
+  for (const b of document.querySelectorAll('[data-add]')) {
+    if (b.dataset.add !== o.id) continue;
+    b.classList.toggle('added', added);
+    b.setAttribute('aria-label', `${added ? 'Ligger i handlelisten' : 'Legg til i handlelisten'}: ${o.title}`);
+  }
+}
+
+let justAdded = null; // id of the list row that should animate in on the next render
 function addItem(text, offer) {
   text = text.trim();
   if (!text) return;
   const eans = offer && offer.eans && offer.eans.length ? offer.eans : undefined;
-  state.list.unshift({ id: uid(), text, done: false, added: Date.now(), offer: offer || null, eans });
+  const id = uid();
+  justAdded = id;
+  state.list.unshift({ id, text, done: false, added: Date.now(), offer: offer || null, eans });
   save.list();
 }
 
@@ -458,13 +487,14 @@ function renderList() {
   const items = [...state.list].sort((a, b) => a.done - b.done);
   $('#list-items').innerHTML = items
     .map(
-      (i) => `<li class="item${i.done ? ' done' : ''}">
+      (i) => `<li class="item${i.done ? ' done' : ''}${i.id === justAdded ? ' new' : ''}" data-item="${esc(i.id)}">
       <label class="tick"><input type="checkbox" data-toggle="${esc(i.id)}" ${i.done ? 'checked' : ''} aria-label="Kryss av ${esc(i.text)}"></label>
       <div class="body"><div class="name">${esc(i.text)}</div>${dealHTML(i)}</div>
       <button class="del" type="button" data-del="${esc(i.id)}" aria-label="Slett ${esc(i.text)}">×</button>
     </li>`,
     )
     .join('');
+  justAdded = null;
   const open = state.list.filter((i) => !i.done);
   const onSale = open.filter((i) => linkedOffer(i) || dealsFor(i.text, i.eans).length).length;
   const done = state.list.length - open.length;
@@ -788,7 +818,7 @@ function exportBackup() {
   const { token, ...sync } = state.settings.sync || {};
   const data = {
     schema: BACKUP_SCHEMA,
-    app: 'Matkassa ' + APP_VERSION,
+    app: 'Matkassa Premium ' + APP_VERSION,
     exported: new Date().toISOString(),
     categories: state.categories,
     rules: state.rules,
@@ -797,7 +827,7 @@ function exportBackup() {
     settings: { ...state.settings, sync }, // never put the GitHub key in a backup file
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const name = `matkassa-backup-${todayISO()}.json`;
+  const name = `matkassa-premium-backup-${todayISO()}.json`;
   const file = new File([blob], name, { type: 'application/json' });
   if (navigator.canShare && navigator.canShare({ files: [file] }) && /iPhone|iPad|Android/i.test(navigator.userAgent)) {
     navigator.share({ files: [file], title: name }).catch(() => {});
@@ -809,6 +839,35 @@ function exportBackup() {
   document.body.appendChild(a);
   a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+/* ---------- one-way copy from the original Matkassa (same origin, same browser) ---------- */
+async function originalExists() {
+  try { return typeof indexedDB.databases === 'function' && (await indexedDB.databases()).some((d) => d.name === db.ORIGINAL_DB); } catch (e) { return false; }
+}
+
+async function copyFromOriginal() {
+  const o = await db.readOriginal();
+  const n = (k) => (Array.isArray(o && o[k]) ? o[k].length : 0);
+  if (!o || !(n('receipts') || n('list') || n('rules'))) { toast('Fant ingen Matkassa-data i denne nettleseren'); return; }
+  if (!confirm(`Kopiere fra Matkassa: ${n('receipts')} kvitteringer, ${n('list')} varer i handlelisten og ${n('rules')} regler? Det erstatter dataene i Matkassa Premium på denne enheten. Matkassa selv endres ikke, og GitHub-nøkkelen kopieres ikke.`)) return;
+  if (Array.isArray(o.categories) && o.categories.length) state.categories = o.categories;
+  state.rules = Array.isArray(o.rules) ? o.rules : [];
+  state.receipts = Array.isArray(o.receipts) ? o.receipts : [];
+  state.list = Array.isArray(o.list) ? o.list : [];
+  if (o.extraOffers && Array.isArray(o.extraOffers.offers)) { state.extraOffers = o.extraOffers; await db.set('extraOffers', o.extraOffers); }
+  if (o.offers && Array.isArray(o.offers.offers) && !state.offersData) { state.offersData = o.offers; await db.set('offers', o.offers); }
+  // Same rules as a backup: this device's token stays; the repo name is copied so only the key has to be pasted.
+  const merged = mergeSettings(state.settings, o.settings || {}, { fromBackup: true });
+  const repo = o.settings && o.settings.sync && typeof o.settings.sync.repo === 'string' ? o.settings.sync.repo : '';
+  if (repo && REPO_RE.test(repo) && repo !== merged.sync.repo) Object.assign(merged.sync, { repo, lastSync: null, lastTry: null, lastError: null });
+  if (merged.area) merged.geo = 'done';
+  state.settings = merged;
+  await Promise.all([save.categories(), save.rules(), save.receipts(), save.list(), save.settings()]);
+  rebuildClassifier();
+  renderGeoCard();
+  toast(`Kopiert fra Matkassa: ${n('receipts')} kvitteringer${state.settings.sync.repo && !state.settings.sync.token ? '. Lim inn GitHub-nøkkelen under Synk for å synke her også' : ''}`);
+  render();
 }
 
 /* ---------- Mer ---------- */
@@ -856,6 +915,7 @@ function renderMore() {
         <button class="btn" type="button" data-action="export">Eksporter backup</button>
         <button class="btn" type="button" data-action="import">Importer fil</button>
       </div>
+      ${state.originalExists ? '<div class="actions"><button class="btn" type="button" data-action="copy-original">Hent data fra Matkassa</button></div><p class="hint" style="margin-top:0">Kopierer kvitteringer, handleliste, kategorier og regler fra den vanlige Matkassa i denne nettleseren. Bare én vei, og ikke GitHub-nøkkelen. På iPhone har hver hjem-skjerm-app egen lagring; bruk da backup-fil i stedet.</p>' : ''}
       <dl class="kv">
         <dt>Kvitteringer</dt><dd>${state.receipts.length}</dd>
         <dt>Varer i listen</dt><dd>${state.list.length}</dd>
@@ -956,7 +1016,10 @@ function renderGeoCard() {
 }
 
 /* ---------- events ---------- */
+let resortTimer;
 function bind() {
+  for (const d of document.querySelectorAll('dialog.sheet')) enableSheetDrag(d);
+  watchLargeTitle($('#large-title'), $('#topbar'));
   document.querySelector('.tabbar').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-tab]');
     if (b) showTab(b.dataset.tab);
@@ -1003,7 +1066,7 @@ function bind() {
         addItem(titleCase(o.title), { id: o.id, chain: o.chain, chainId: o.chainId, price: o.price, till: o.till, title: o.title, eans: o.eans });
         toast(`Lagt til: ${titleCase(o.title)}`);
       }
-      renderOffers();
+      syncAddButtons(o);
       renderBadge();
     }
     if (e.target.closest('[data-action="refresh"]')) loadOffers(true);
@@ -1023,15 +1086,22 @@ function bind() {
     const id = e.target.dataset.toggle;
     if (!id) return;
     const it = state.list.find((i) => i.id === id);
-    if (it) { it.done = e.target.checked; save.list(); renderList(); renderBadge(); }
+    if (!it) return;
+    it.done = e.target.checked;
+    save.list();
+    e.target.closest('.item').classList.toggle('done', it.done);
+    renderBadge();
+    clearTimeout(resortTimer);
+    resortTimer = setTimeout(() => { if (state.tab === 'liste') renderList(); }, 650);
   });
-  $('#list-items').addEventListener('click', (e) => {
+  $('#list-items').addEventListener('click', async (e) => {
     const del = e.target.closest('[data-del]');
     if (!del) return;
     state.list = state.list.filter((i) => i.id !== del.dataset.del);
     save.list();
-    renderList();
     renderBadge();
+    await exitRow(del.closest('.item'));
+    renderList();
   });
   $('#list-clear').addEventListener('click', () => {
     state.list = state.list.filter((i) => !i.done);
@@ -1047,6 +1117,7 @@ function bind() {
     if (act === 'import') $('#file-input').click();
     if (act === 'manual') openReceiptDialog();
     if (act === 'export') exportBackup();
+    if (act === 'copy-original') copyFromOriginal();
     if (act === 'area-here' || act === 'geo-ask') useMyLocation(); // a tap may always ask again (iOS may need the gesture)
     if (act === 'geo-skip') { state.settings.geo = 'done'; save.settings(); renderGeoCard(); toast(`Viser tilbud for ${DEFAULT_AREA.name}. Bytt i Mer → Område.`); }
     if (act === 'sync-forget') {
@@ -1180,7 +1251,8 @@ function bind() {
   window.addEventListener('online', () => { state.error = null; loadOffers(); });
   window.addEventListener('offline', () => { state.error = 'Frakoblet'; renderStatus(); });
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) return;
+    if (document.hidden) { if (!$('#toast').hidden) clearTimeout(toastTimer); return; }
+    if (!$('#toast').hidden) { clearTimeout(toastTimer); toastTimer = setTimeout(hideToast, TOAST_MS); }
     loadOffers();
     if (syncDue()) syncSpending({ quiet: true });
   });
@@ -1208,6 +1280,7 @@ async function start() {
   const hash = location.hash.slice(1);
   showTab(['tilbud', 'liste', 'forbruk', 'mer'].includes(hash) ? hash : 'tilbud');
   db.persist().then((p) => (state.persisted = p));
+  originalExists().then((v) => { state.originalExists = v; if (v && state.tab === 'mer') renderMore(); });
   loadOffers();
   firstRunLocation();
   if (syncDue()) syncSpending({ quiet: true });

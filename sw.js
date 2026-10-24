@@ -1,9 +1,9 @@
-// Matkassa service worker: precache the app shell, cache offer images.
+// Matkassa Premium service worker: precache the app shell, cache offer images.
 // Offer data itself is stored by the app in IndexedDB, so offers work offline too.
-// Cache names are per app: Matkassa Premium lives on the same GitHub Pages origin and its caches must survive
-// this worker's cleanup, so only delete caches with this app's own prefix.
-const PREFIX = 'matkassa-v';
-const VERSION = PREFIX + '7';
+// Cache names are per app: the original Matkassa lives on the same GitHub Pages origin ('matkassa-v*',
+// 'matkassa-img'), so this worker uses its own prefix and only ever deletes its own caches.
+const PREFIX = 'matkassa-premium-v';
+const VERSION = PREFIX + '1';
 const SHELL = [
   './',
   'index.html',
@@ -17,12 +17,13 @@ const SHELL = [
   'js/profile.js',
   'js/extra-offers.js',
   'js/settings.js',
+  'js/motion.js',
   'icons/icon.svg',
   'icons/icon-192.png',
   'icons/icon-512.png',
   'icons/apple-touch-icon.png',
 ];
-const IMG_CACHE = 'matkassa-img';
+const IMG_CACHE = 'matkassa-premium-img';
 const IMG_MAX = 400;
 const NET_TIMEOUT_MS = 3000;
 const SLOW_WINDOW_MS = 30000; // after a slow/failed shell request, serve the shell from cache for this long

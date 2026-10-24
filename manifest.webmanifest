@@ -1,6 +1,7 @@
 {
-  "name": "Matkassa",
-  "short_name": "Matkassa",
+  "id": "./",
+  "name": "Matkassa Premium",
+  "short_name": "Matkassa+",
   "description": "Ukens mattilbud, handleliste og matforbruk.",
   "lang": "nb",
   "start_url": "./#tilbud",

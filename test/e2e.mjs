@@ -250,7 +250,7 @@ async function a11yAudit(where) {
 
 /* ---------- location: isolated browser contexts (fresh storage, own permissions) ---------- */
 const ORIGIN = BASE.replace(/\/$/, '');
-const APP_DB = 'matkassa';
+const APP_DB = 'matkassa-premium';
 const readSettings = () => evaluate(`const db = await new Promise((r, j) => { const q = indexedDB.open('${APP_DB}'); q.onsuccess = () => r(q.result); q.onerror = j; }); if (!db.objectStoreNames.contains('kv')) return null; return await new Promise(r => { const q = db.transaction('kv').objectStore('kv').get('settings'); q.onsuccess = () => r(q.result || null); });`);
 // Counts geolocation calls per page load. failFirst: the first call in this tab fails like iOS without a tap
 // (TIMEOUT, no prompt shown); later calls go to Chrome, which answers from Emulation.setGeolocationOverride.
@@ -380,8 +380,120 @@ async function locationTests() {
   });
 }
 
+/* ---------- premium: same origin as the original Matkassa, nothing shared by accident ---------- */
+const ORIG_DB = 'matkassa';
+const dbNames = () => evaluate(`return (await indexedDB.databases()).map((d) => d.name + '@' + d.version).sort();`);
+async function isolationTests() {
+  // I1. The original Matkassa already lives on this origin (data + caches). Premium installs next to it.
+  await inFreshContext('isolation', async () => {
+    await navigate(BASE + 'manifest.webmanifest');
+    await evaluate(`const db = await new Promise((r, j) => { const q = indexedDB.open('${ORIG_DB}', 1); q.onupgradeneeded = () => q.result.createObjectStore('kv'); q.onsuccess = () => r(q.result); q.onerror = j; });
+      await new Promise((r) => { const t = db.transaction('kv', 'readwrite'); const s = t.objectStore('kv');
+        s.put([{ id: 'orig-1-FAKE', source: 'manual', store: 'TESTBUTIKK (FAKE)', chain: 'TESTBUTIKK (FAKE)', date: '2026-10-01', total: 99, lines: [{ name: 'TINE HELMELK (FAKE)', amount: 99 }] }], 'receipts');
+        s.put([{ id: 'l1', text: 'egg (FAKE)', done: false, added: 1, offer: null }], 'list');
+        s.put({ chains: [], hiddenChains: [], area: { name: 'Bergen', lat: 60.3913, lng: 5.3221, radius: 30000 }, geo: 'done', sync: { repo: '${FAKE_REPO}', path: 'spending.json', token: '${FAKE_TOKEN}' } }, 'settings');
+        t.oncomplete = r; });
+      db.close();
+      await (await caches.open('matkassa-v7')).put('/matkassa/index.html', new Response('original shell (FAKE)'));
+      await (await caches.open('matkassa-img')).put('/img-FAKE.png', new Response('img'));
+      return true;`);
+    await navigate(BASE + 'index.html');
+    check(await waitFor(`navigator.serviceWorker && navigator.serviceWorker.controller`, 15000) || (await navigate(BASE + 'index.html'), await waitFor(`navigator.serviceWorker.controller`, 15000)), 'isolation: premium service worker installed and active');
+    await sleep(500);
+    const keys = await evaluate(`return (await caches.keys()).sort();`);
+    check(keys.includes('matkassa-v7') && keys.includes('matkassa-img'), "isolation: the original's caches survive premium's install/activate", keys.join(', '));
+    check(keys.some((k) => /^matkassa-premium-v\d+$/.test(k)) && keys.every((k) => k.startsWith('matkassa-premium-') || k === 'matkassa-v7' || k === 'matkassa-img'), 'isolation: premium only adds its own matkassa-premium-* caches', keys.join(', '));
+    const names = await dbNames();
+    check(names.includes(`${ORIG_DB}@1`) && names.includes(`${APP_DB}@1`), 'isolation: two separate IndexedDB databases, the original still at version 1', names.join(', '));
+    check((await readSettings()) === null || !(await readSettings()).sync.token, 'isolation: premium does not pick up the original\'s settings by itself');
+    await tab('mer');
+    check(await waitFor(`!!document.querySelector('[data-action="copy-original"]')`, 5000), 'copy: "Hent data fra Matkassa" offered when the original has data');
+    await click('[data-action="copy-original"]');
+    await sleep(500);
+    const copied = await evaluate(`const db = await new Promise((r) => { const q = indexedDB.open('${APP_DB}'); q.onsuccess = () => r(q.result); });
+      const get = (k) => new Promise((r) => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => r(q.result); });
+      return { receipts: (await get('receipts') || []).length, list: (await get('list') || []).length, settings: await get('settings') };`);
+    check(copied.receipts === 1 && copied.list === 1, 'copy: receipts and list copied into premium', JSON.stringify({ r: copied.receipts, l: copied.list }));
+    check(copied.settings.sync.repo === FAKE_REPO && !copied.settings.sync.token && copied.settings.area && copied.settings.area.name === 'Bergen', 'copy: repo name and area copied, GitHub token NOT copied');
+    const orig = await evaluate(`const db = await new Promise((r) => { const q = indexedDB.open('${ORIG_DB}'); q.onsuccess = () => r(q.result); });
+      const v = db.version; const st = await new Promise((r) => { const q = db.transaction('kv').objectStore('kv').get('settings'); q.onsuccess = () => r(q.result); }); db.close(); return { v, token: st.sync.token };`);
+    check(orig.v === 1 && orig.token === FAKE_TOKEN, "copy: the original's database is untouched (version 1, its own token)");
+  });
+
+  // I2. No original on this origin: premium must not create an empty 'matkassa' database (that would break it).
+  await inFreshContext('no original', async () => {
+    await navigate(BASE + 'index.html');
+    await waitFor(`document.querySelectorAll('#offer-list li').length > 0`, 20000);
+    await tab('mer');
+    await sleep(800);
+    const names = await dbNames();
+    check(!names.some((n) => n.startsWith(`${ORIG_DB}@`)), "isolation: premium never creates the original's database", names.join(', '));
+    check(!(await evaluate(`return !!document.querySelector('[data-action="copy-original"]');`)), 'copy: button hidden when there is no original data');
+  });
+}
+
+/* ---------- premium: motion and native feel ---------- */
+const touchDrag = async (x, y0, y1, steps, msPerStep) => {
+  await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y: y0 }] }, S);
+  for (let i = 1; i <= steps; i++) {
+    await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y0 + ((y1 - y0) * i) / steps }] }, S);
+    await sleep(msPerStep);
+  }
+  await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }, S);
+};
+async function motionTests() {
+  // M1. + → ✓ morphs in place (same element, not a re-render), so the transition can actually play.
+  await tab('tilbud');
+  const morph = await evaluate(`const b = [...document.querySelectorAll('#offer-list [data-add]')].find((x) => !x.classList.contains('added'));
+    b.click(); await new Promise((r) => setTimeout(r, 50));
+    const same = document.contains(b) && b.classList.contains('added');
+    const t = getComputedStyle(b.querySelector('.i-check')).transitionProperty;
+    b.click(); await new Promise((r) => setTimeout(r, 50));
+    return { same, back: !b.classList.contains('added'), t };`);
+  check(morph.same && morph.back && /opacity/.test(morph.t) && /transform/.test(morph.t), 'motion: add button morphs + → ✓ in place (opacity/transform transition)', JSON.stringify(morph));
+  check(await waitFor(`document.querySelector('#toast').hidden`, 5000), 'motion: toast leaves by itself (exit transition, then hidden)');
+
+  // M2. Press feedback exists on pressables (scale on :active) and hover is gated.
+  const rules = await evaluate(`return [...document.styleSheets].flatMap((s) => [...s.cssRules]).map((r) => r.cssText).join(' ');`);
+  const press = { btn: /\.btn:active \{[^}]*scale\(0\.97\)/.test(rules), chip: /\.chip:active \{[^}]*scale\(0\.95\)/.test(rules), add: /\.add:active \{[^}]*scale\(0\.92\)/.test(rules) };
+  check(press.btn && press.chip && press.add, 'motion: press feedback (scale) on buttons, chips and +', JSON.stringify(press));
+
+  // M3. Bottom sheet: slides up; a flick down on the grabber closes it; a short slow drag snaps back.
+  await tab('forbruk');
+  await click('[data-action="manual"]');
+  await sleep(500);
+  const g = await evaluate(`const r = document.querySelector('#dlg-receipt .grabber').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, open: document.querySelector('#dlg-receipt').open, tf: getComputedStyle(document.querySelector('#dlg-receipt')).transform };`);
+  check(g.open && (g.tf === 'none' || /matrix\(1, 0, 0, 1, 0, 0\)/.test(g.tf)), 'sheet: opens and settles at rest', g.tf);
+  await shot('10-sheet-open');
+  await touchDrag(g.x, g.y, g.y + 40, 8, 40); // slow, short: stays
+  await sleep(600);
+  check(await evaluate(`return document.querySelector('#dlg-receipt').open;`), 'sheet: a short slow drag snaps back (stays open)');
+  await touchDrag(g.x, g.y, g.y + 160, 4, 8); // a flick: closes
+  check(await waitFor(`!document.querySelector('#dlg-receipt').open`, 2000), 'sheet: a flick down on the grabber closes it');
+  check(await evaluate(`const f = document.querySelector('#receipt-form'); f.store.value = ''; return document.activeElement === document.body || !document.querySelector('dialog[open]');`), 'sheet: nothing left open or focused after the drag');
+
+  // M4. Reduced motion: the sheet fades instead of sliding, nothing moves.
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }, { name: 'prefers-reduced-motion', value: 'reduce' }] }, S);
+  await click('[data-action="manual"]');
+  const rm = await evaluate(`const d = document.querySelector('#dlg-receipt'); const cs = getComputedStyle(d); return { tf: cs.transform, tp: cs.transitionProperty };`);
+  check((rm.tf === 'none') && !/transform/.test(rm.tp) && /opacity/.test(rm.tp), 'reduced motion: sheet cross-fades, no slide', JSON.stringify(rm));
+  await evaluate(`document.querySelector('#dlg-receipt').close(); return true;`);
+  await sleep(300);
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }, S);
+
+  // M5. Scroll edge: the hairline and compact title appear only once the large title is under the bar.
+  await tab('tilbud');
+  const top = await evaluate(`return document.querySelector('#topbar').classList.contains('scrolled');`);
+  await evaluate(`window.scrollTo(0, 600); await new Promise((r) => setTimeout(r, 400)); return true;`);
+  const down = await evaluate(`return document.querySelector('#topbar').classList.contains('scrolled') && getComputedStyle(document.querySelector('#bar-title')).opacity !== '0';`);
+  check(!top && down, 'scroll edge: compact title + hairline only when scrolled', JSON.stringify({ top, down }));
+  await shot('11-tilbud-scrolled');
+  await evaluate(`window.scrollTo(0, 0); return true;`);
+}
+
 /* ---------- the tests ---------- */
 try {
+  await isolationTests();
   await locationTests();
   // The main run below starts as a user who said no to location (Trondheim), so it doesn't depend on Chrome's prompt.
   await send('Browser.setPermission', { permission: { name: 'geolocation' }, setting: 'denied', origin: ORIGIN });
@@ -536,6 +648,8 @@ try {
   check(dt < 8000, 'huge data: 3 000 receipts import + profile + render', `${dt} ms (${msg})`);
   check(await evaluate(`return document.querySelectorAll('#offer-list li').length > 0;`), 'huge data: app still renders offers');
 
+  await motionTests();
+
   // 11. Offline: service worker serves the app shell, data stays
   check(await waitFor(`navigator.serviceWorker && navigator.serviceWorker.controller`, 15000) || (await navigate(BASE + 'index.html'), await waitFor(`navigator.serviceWorker.controller`, 15000)), 'service worker controls the page');
   // 11a. Weak signal: the server answers nothing for 8 s. The app must open from cache in ~3 s, not 3 s per
@@ -572,7 +686,7 @@ try {
   const pass = results.filter((r) => r.ok && !r.warn).length;
   const fail = results.filter((r) => !r.ok).length;
   const md = [
-    `# Matkassa e2e report`, '', `${new Date().toISOString()} · ${LIVE ? 'live Tjek' : 'fake network'} · 390×844 · **${fail ? 'FAIL' : 'PASS'}** (${pass} passed, ${fail} failed, ${results.filter((r) => r.warn).length} warnings)`, '',
+    `# Matkassa Premium e2e report`, '', `${new Date().toISOString()} · ${LIVE ? 'live Tjek' : 'fake network'} · 390×844 · **${fail ? 'FAIL' : 'PASS'}** (${pass} passed, ${fail} failed, ${results.filter((r) => r.warn).length} warnings)`, '',
     '| | Check | Detail |', '|---|---|---|',
     ...results.map((r) => `| ${r.warn ? 'WARN' : r.ok ? 'PASS' : 'FAIL'} | ${r.name} | ${r.detail.replace(/\|/g, '\\|').slice(0, 300)} |`),
     '', `Screenshots: test/tmp/shots/`, 'All data used is FAKE test data from test/fake/.',

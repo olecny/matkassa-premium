@@ -100,24 +100,48 @@ const swSrc = fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
 ok(/slowUntil/.test(swSrc) && /if \(degraded\) return cached/.test(swSrc), 'sw: after one slow request the rest of the load is served from cache');
 const missing = fs.readdirSync(new URL('../js/', import.meta.url)).filter((f) => f.endsWith('.js') && !swSrc.includes(`'js/${f}'`));
 ok(!missing.length, 'sw: every js module is precached for offline', missing.join(','));
-const syncSh = fs.readFileSync(new URL('../ingest/sync.sh', import.meta.url), 'utf8');
-ok(!/olecny/i.test(syncSh) && /OFFENTLIG/.test(syncSh), 'sync.sh: no personal default, refuses public repos');
-
 /* ---------- first-run location (geo) ---------- */
 ok(defaultSettings().geo === null, 'geo: never asked by default');
 ok(mergeSettings(defaultSettings(), { geo: 'done' }).geo === 'done' && mergeSettings(defaultSettings(), { geo: 'x' }).geo === null, 'geo: only known states are kept');
 ok(mergeSettings({ ...defaultSettings(), geo: 'asked' }, { geo: 'done' }, { fromBackup: true }).geo === 'asked', 'geo: a backup never changes this device\'s location state');
 ok(mergeSettings({ ...defaultSettings(), geo: 'done' }, { chains: [] }).geo === 'done', 'geo: kept when stored settings lack the field');
 
-/* ---------- service worker: shared origin with Matkassa Premium ---------- */
-ok(/k\.startsWith\(PREFIX\) && k !== VERSION/.test(swSrc) && /const PREFIX = 'matkassa-v'/.test(swSrc), 'sw: only deletes its own caches (premium copy shares the origin)');
-ok(!'matkassa-premium-v1'.startsWith('matkassa-v') && !'matkassa-premium-img'.startsWith('matkassa-v'), 'sw: premium cache names fall outside this prefix');
+/* ---------- same origin as the original Matkassa: nothing shared by accident ---------- */
+ok(/const PREFIX = 'matkassa-premium-v'/.test(swSrc) && /k\.startsWith\(PREFIX\) && k !== VERSION/.test(swSrc), 'sw: own cache prefix, only deletes its own caches');
+ok(/IMG_CACHE = 'matkassa-premium-img'/.test(swSrc), 'sw: own image cache');
+for (const theirs of ['matkassa-v7', 'matkassa-v8', 'matkassa-img']) ok(!theirs.startsWith('matkassa-premium-v'), `sw: never deletes the original's cache ${theirs}`);
+ok(!'matkassa-premium-v1'.startsWith('matkassa-v'), "sw: the original's cleanup (prefix matkassa-v) can't match our caches");
+const dbSrc = fs.readFileSync(new URL('../js/db.js', import.meta.url), 'utf8');
+ok(/const DB_NAME = 'matkassa-premium'/.test(dbSrc), 'db: own IndexedDB database');
+ok(/onupgradeneeded = \(\) => req\.transaction\.abort\(\)/.test(dbSrc) && !/indexedDB\.open\(ORIGINAL_DB,/.test(dbSrc), "db: reading the original never creates or upgrades its database");
+ok(!/\.put\(|readwrite/.test(dbSrc.slice(dbSrc.indexOf('export async function readOriginal'), dbSrc.indexOf('export async function persist'))), "db: the original's database is only read");
+const manifest = JSON.parse(fs.readFileSync(new URL('../manifest.webmanifest', import.meta.url), 'utf8'));
+ok(manifest.scope === './' && manifest.start_url.startsWith('./') && /Premium/.test(manifest.name), 'manifest: relative scope (/matkassa-premium/), own name');
+const appSrcP = fs.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+ok(!/localStorage|sessionStorage/.test(appSrcP), 'app: no shared localStorage keys at all (everything in its own IndexedDB)');
+ok(/matkassa-premium-backup-/.test(appSrcP), 'app: own backup file name (same, compatible backup format)');
 
-/* ---------- weekly sync (launchd) ---------- */
-const tpl = fs.readFileSync(new URL('../ingest/launchd/matkassa-weekly-sync.plist.template', import.meta.url), 'utf8');
-ok(/__APP_DIR__/.test(tpl) && /__PATH__/.test(tpl) && !/\/Users\//.test(tpl) && /StartCalendarInterval/.test(tpl), 'launchd: plist is a template with placeholders, no personal paths');
-const runSync = fs.readFileSync(new URL('../ingest/launchd/run-sync.sh', import.meta.url), 'utf8');
-ok(/GIT_TERMINAL_PROMPT=0/.test(runSync) && /last-run\.txt/.test(runSync) && /mask/.test(runSync), 'launchd: no git prompts, status file, token masking');
-ok(fs.readFileSync(new URL('../.gitignore', import.meta.url), 'utf8').includes('ingest/logs/'), 'launchd: logs are git-ignored');
+/* ---------- motion lint: the never-ship rules from the design skills, checked on styles.css ---------- */
+const css = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+ok(!/transition:\s*all|transition-property:\s*all/.test(css), 'motion: no `transition: all`');
+ok(!/ease-in[;,)\s]/.test(css.replace(/ease-in-out/g, '')), 'motion: no ease-in on UI');
+ok(!/scale\(0\)/.test(css), 'motion: nothing animates from scale(0)');
+ok(/--ease-out: cubic-bezier\(0\.23, 1, 0\.32, 1\)/.test(css) && /--ease-drawer: cubic-bezier\(0\.32, 0\.72, 0, 1\)/.test(css), 'motion: easing tokens from the skill');
+const durations = [...css.matchAll(/(\d+)ms/g)].map((m) => Number(m[1]));
+ok(durations.every((d) => d <= 400 || d === 700 || d === 1200), 'motion: UI durations ≤ 400 ms (spinner/pulse excepted)', durations.join(','));
+const hovers = css.split('@media (hover: hover) and (pointer: fine)');
+ok(!/:hover/.test(hovers[0]) && hovers.length === 2 && !/:hover/.test(hovers[1].slice(hovers[1].indexOf('\n}\n'))), 'mobile: every :hover is behind (hover: hover) and (pointer: fine)');
+ok(/@media \(prefers-reduced-motion: reduce\)/.test(css) && /@media \(prefers-reduced-transparency: reduce\)/.test(css), 'a11y: reduced motion and reduced transparency handled');
+ok(/-webkit-tap-highlight-color: transparent/.test(css) && /touch-action: manipulation/.test(css) && /font-size: 16px/.test(css), 'mobile: no tap flash, no tap delay, no input zoom');
+ok(/100dvh|92dvh/.test(css) && !/100vh/.test(css), 'mobile: dvh, not 100vh');
+const transitions = [...css.matchAll(/transition(?:-property)?:([^;]+);/g)].map((m) => m[1]);
+const layoutProps = transitions.filter((t) => /\b(width|height|top|left|margin|padding)\b/.test(t));
+ok(!layoutProps.length, 'performance: no layout properties in transitions (block-size only for the accordion)', layoutProps.join(' | '));
+const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+ok(/viewport-fit=cover/.test(html) && !/user-scalable=no|maximum-scale=1/.test(html), 'mobile: safe areas on, zoom never disabled');
+const motion = await import('../js/motion.js');
+ok(motion.shouldDismiss(60, 0.5, 600) && !motion.shouldDismiss(60, 0.05, 600) && motion.shouldDismiss(260, 0.01, 600) && !motion.shouldDismiss(-40, 1, 600), 'sheet: a flick (> 0.11 px/ms) or a third of the height closes; up never closes');
+const rb = (x) => motion.rubberband(x, 600);
+ok(rb(100) < 100 && rb(400) - rb(300) < rb(100) - rb(0), 'sheet: dragging up rubber-bands (resistance grows)');
 
 console.log(failed ? `\n${failed} FAILED` : '\nAll unit tests passed');
