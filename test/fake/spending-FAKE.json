@@ -1,0 +1,484 @@
+{
+ "schema": "matkassa.spending/1",
+ "_note": "FAKE TEST DATA – invented for Matkassa tests. Not a real person, store, receipt or token. EANs use the 200–299 in-store range, which is never on real products.",
+ "generated": "2026-10-24T12:00:00+02:00",
+ "source": "rema",
+ "receipts": [
+  {
+   "id": "fake-1",
+   "source": "rema",
+   "chain": "REMA 1000",
+   "store": "TESTBUTIKK (FAKE)",
+   "date": "2026-10-20",
+   "time": "12:00",
+   "total": 103.3,
+   "currency": "NOK",
+   "category": null,
+   "lines": [
+    {
+     "name": "TINE HELMELK 1,75L",
+     "ean": "2000000000022",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 27.9,
+     "group": "MELK"
+    },
+    {
+     "name": "FILTERKAFFE KJELDSB",
+     "ean": "2000000000015",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 49.9,
+     "group": "KAFFE"
+    },
+    {
+     "name": "BANANER",
+     "ean": "2000000000053",
+     "qty": 0.9,
+     "unit": "kg",
+     "amount": 23.5,
+     "group": "FRUKT"
+    },
+    {
+     "name": "PANT",
+     "amount": 2
+    }
+   ]
+  },
+  {
+   "id": "fake-2",
+   "source": "rema",
+   "chain": "REMA 1000",
+   "store": "TESTBUTIKK (FAKE)",
+   "date": "2026-10-11",
+   "time": "12:00",
+   "total": 124.7,
+   "currency": "NOK",
+   "category": null,
+   "lines": [
+    {
+     "name": "TINE HELMELK 1,75L",
+     "ean": "2000000000022",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 27.9,
+     "group": "MELK"
+    },
+    {
+     "name": "FILTERKAFFE KJELDSB",
+     "ean": "2000000000015",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 49.9,
+     "group": "KAFFE"
+    },
+    {
+     "name": "EGG 12PK FRITTG",
+     "ean": "2000000000039",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 44.9,
+     "group": "EGG"
+    },
+    {
+     "name": "PANT",
+     "amount": 2
+    }
+   ]
+  },
+  {
+   "id": "fake-3",
+   "source": "rema",
+   "chain": "REMA 1000",
+   "store": "TESTBUTIKK (FAKE)",
+   "date": "2026-10-02",
+   "time": "12:00",
+   "total": 79.8,
+   "currency": "NOK",
+   "category": null,
+   "lines": [
+    {
+     "name": "TINE HELMELK 1,75L",
+     "ean": "2000000000022",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 27.9,
+     "group": "MELK"
+    },
+    {
+     "name": "FILTERKAFFE KJELDSB",
+     "ean": "2000000000015",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 49.9,
+     "group": "KAFFE"
+    },
+    {
+     "name": "PANT",
+     "amount": 2
+    }
+   ]
+  },
+  {
+   "id": "fake-4",
+   "source": "rema",
+   "chain": "REMA 1000",
+   "store": "TESTBUTIKK (FAKE)",
+   "date": "2026-09-23",
+   "time": "12:00",
+   "total": 148.2,
+   "currency": "NOK",
+   "category": null,
+   "lines": [
+    {
+     "name": "TINE HELMELK 1,75L",
+     "ean": "2000000000022",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 27.9,
+     "group": "MELK"
+    },
+    {
+     "name": "FILTERKAFFE KJELDSB",
+     "ean": "2000000000015",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 49.9,
+     "group": "KAFFE"
+    },
+    {
+     "name": "EGG 12PK FRITTG",
+     "ean": "2000000000039",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 44.9,
+     "group": "EGG"
+    },
+    {
+     "name": "BANANER",
+     "ean": "2000000000053",
+     "qty": 0.9,
+     "unit": "kg",
+     "amount": 23.5,
+     "group": "FRUKT"
+    },
+    {
+     "name": "PANT",
+     "amount": 2
+    }
+   ]
+  },
+  {
+   "id": "fake-5",
+   "source": "rema",
+   "chain": "REMA 1000",
+   "store": "TESTBUTIKK (FAKE)",
+   "date": "2026-09-14",
+   "time": "12:00",
+   "total": 79.8,
+   "currency": "NOK",
+   "category": null,
+   "lines": [
+    {
+     "name": "TINE HELMELK 1,75L",
+     "ean": "2000000000022",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 27.9,
+     "group": "MELK"
+    },
+    {
+     "name": "FILTERKAFFE KJELDSB",
+     "ean": "2000000000015",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 49.9,
+     "group": "KAFFE"
+    },
+    {
+     "name": "PANT",
+     "amount": 2
+    }
+   ]
+  },
+  {
+   "id": "fake-6",
+   "source": "rema",
+   "chain": "REMA 1000",
+   "store": "TESTBUTIKK (FAKE)",
+   "date": "2026-09-05",
+   "time": "12:00",
+   "total": 124.7,
+   "currency": "NOK",
+   "category": null,
+   "lines": [
+    {
+     "name": "TINE HELMELK 1,75L",
+     "ean": "2000000000022",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 27.9,
+     "group": "MELK"
+    },
+    {
+     "name": "FILTERKAFFE KJELDSB",
+     "ean": "2000000000015",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 49.9,
+     "group": "KAFFE"
+    },
+    {
+     "name": "EGG 12PK FRITTG",
+     "ean": "2000000000039",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 44.9,
+     "group": "EGG"
+    },
+    {
+     "name": "PANT",
+     "amount": 2
+    }
+   ]
+  },
+  {
+   "id": "fake-7",
+   "source": "rema",
+   "chain": "REMA 1000",
+   "store": "TESTBUTIKK (FAKE)",
+   "date": "2026-08-27",
+   "time": "12:00",
+   "total": 103.3,
+   "currency": "NOK",
+   "category": null,
+   "lines": [
+    {
+     "name": "TINE HELMELK 1,75L",
+     "ean": "2000000000022",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 27.9,
+     "group": "MELK"
+    },
+    {
+     "name": "FILTERKAFFE KJELDSB",
+     "ean": "2000000000015",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 49.9,
+     "group": "KAFFE"
+    },
+    {
+     "name": "BANANER",
+     "ean": "2000000000053",
+     "qty": 0.9,
+     "unit": "kg",
+     "amount": 23.5,
+     "group": "FRUKT"
+    },
+    {
+     "name": "PANT",
+     "amount": 2
+    }
+   ]
+  },
+  {
+   "id": "fake-8",
+   "source": "rema",
+   "chain": "REMA 1000",
+   "store": "TESTBUTIKK (FAKE)",
+   "date": "2026-08-18",
+   "time": "12:00",
+   "total": 124.7,
+   "currency": "NOK",
+   "category": null,
+   "lines": [
+    {
+     "name": "TINE HELMELK 1,75L",
+     "ean": "2000000000022",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 27.9,
+     "group": "MELK"
+    },
+    {
+     "name": "FILTERKAFFE KJELDSB",
+     "ean": "2000000000015",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 49.9,
+     "group": "KAFFE"
+    },
+    {
+     "name": "EGG 12PK FRITTG",
+     "ean": "2000000000039",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 44.9,
+     "group": "EGG"
+    },
+    {
+     "name": "PANT",
+     "amount": 2
+    }
+   ]
+  },
+  {
+   "id": "fake-9",
+   "source": "rema",
+   "chain": "REMA 1000",
+   "store": "TESTBUTIKK (FAKE)",
+   "date": "2026-08-09",
+   "time": "12:00",
+   "total": 79.8,
+   "currency": "NOK",
+   "category": null,
+   "lines": [
+    {
+     "name": "TINE HELMELK 1,75L",
+     "ean": "2000000000022",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 27.9,
+     "group": "MELK"
+    },
+    {
+     "name": "FILTERKAFFE KJELDSB",
+     "ean": "2000000000015",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 49.9,
+     "group": "KAFFE"
+    },
+    {
+     "name": "PANT",
+     "amount": 2
+    }
+   ]
+  },
+  {
+   "id": "fake-10",
+   "source": "rema",
+   "chain": "REMA 1000",
+   "store": "TESTBUTIKK (FAKE)",
+   "date": "2026-07-31",
+   "time": "12:00",
+   "total": 148.2,
+   "currency": "NOK",
+   "category": null,
+   "lines": [
+    {
+     "name": "TINE HELMELK 1,75L",
+     "ean": "2000000000022",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 27.9,
+     "group": "MELK"
+    },
+    {
+     "name": "FILTERKAFFE KJELDSB",
+     "ean": "2000000000015",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 49.9,
+     "group": "KAFFE"
+    },
+    {
+     "name": "EGG 12PK FRITTG",
+     "ean": "2000000000039",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 44.9,
+     "group": "EGG"
+    },
+    {
+     "name": "BANANER",
+     "ean": "2000000000053",
+     "qty": 0.9,
+     "unit": "kg",
+     "amount": 23.5,
+     "group": "FRUKT"
+    },
+    {
+     "name": "PANT",
+     "amount": 2
+    }
+   ]
+  },
+  {
+   "id": "fake-11",
+   "source": "rema",
+   "chain": "REMA 1000",
+   "store": "TESTBUTIKK (FAKE)",
+   "date": "2026-07-22",
+   "time": "12:00",
+   "total": 79.8,
+   "currency": "NOK",
+   "category": null,
+   "lines": [
+    {
+     "name": "TINE HELMELK 1,75L",
+     "ean": "2000000000022",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 27.9,
+     "group": "MELK"
+    },
+    {
+     "name": "FILTERKAFFE KJELDSB",
+     "ean": "2000000000015",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 49.9,
+     "group": "KAFFE"
+    },
+    {
+     "name": "PANT",
+     "amount": 2
+    }
+   ]
+  },
+  {
+   "id": "fake-12",
+   "source": "rema",
+   "chain": "REMA 1000",
+   "store": "TESTBUTIKK (FAKE)",
+   "date": "2026-07-13",
+   "time": "12:00",
+   "total": 124.7,
+   "currency": "NOK",
+   "category": null,
+   "lines": [
+    {
+     "name": "TINE HELMELK 1,75L",
+     "ean": "2000000000022",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 27.9,
+     "group": "MELK"
+    },
+    {
+     "name": "FILTERKAFFE KJELDSB",
+     "ean": "2000000000015",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 49.9,
+     "group": "KAFFE"
+    },
+    {
+     "name": "EGG 12PK FRITTG",
+     "ean": "2000000000039",
+     "qty": 1,
+     "unit": "stk",
+     "amount": 44.9,
+     "group": "EGG"
+    },
+    {
+     "name": "PANT",
+     "amount": 2
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,1821 @@
+{
+ "_note": "FAKE TEST DATA – invented for Matkassa tests. Not a real person, store, receipt or token. EANs use the 200–299 in-store range, which is never on real products.",
+ "catalogs": [
+  {
+   "id": "FAKE-REMA",
+   "dealer_id": "faa0Ym",
+   "dealer": {
+    "id": "faa0Ym",
+    "name": "REMA 1000",
+    "color": "ffffff"
+   },
+   "offer_count": 1,
+   "run_from": "NOW-2D",
+   "run_till": "NOW+5D"
+  },
+  {
+   "id": "FAKE-KIWI",
+   "dealer_id": "257bxm",
+   "dealer": {
+    "id": "257bxm",
+    "name": "KIWI",
+    "color": "00a650"
+   },
+   "offer_count": 1,
+   "run_from": "NOW-2D",
+   "run_till": "NOW+5D"
+  }
+ ],
+ "offers": {
+  "FAKE-REMA": [
+   {
+    "id": "fake-r1",
+    "heading": "TINE HELMELK",
+    "description": "Tine, 1,75 l",
+    "catalog_id": "FAKE-REMA",
+    "dealer_id": "faa0Ym",
+    "dealer": {
+     "id": "faa0Ym",
+     "color": "ffffff"
+    },
+    "pricing": {
+     "price": 24.9,
+     "pre_price": 27.9,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-r1"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-r2",
+    "heading": "UTVALGT KJELDSBERG KAFFE",
+    "description": "Kjeldsberg, 250 g, flere varianter",
+    "catalog_id": "FAKE-REMA",
+    "dealer_id": "faa0Ym",
+    "dealer": {
+     "id": "faa0Ym",
+     "color": "ffffff"
+    },
+    "pricing": {
+     "price": 34.9,
+     "pre_price": 49.9,
+     "currency": "NOK"
+    },
+    "quantity": {
+     "unit": {
+      "symbol": "g",
+      "si": {
+       "symbol": "kg",
+       "factor": 0.001
+      }
+     },
+     "size": {
+      "from": 250,
+      "to": 250
+     },
+     "pieces": {
+      "from": 1,
+      "to": 1
+     }
+    },
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-r2"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-r3",
+    "heading": "EGG NUDLER",
+    "description": "Testmerke, 250 g",
+    "catalog_id": "FAKE-REMA",
+    "dealer_id": "faa0Ym",
+    "dealer": {
+     "id": "faa0Ym",
+     "color": "ffffff"
+    },
+    "pricing": {
+     "price": 19.9,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-r3"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-r4",
+    "heading": "FRITTGÅENDE EGG 12 STK",
+    "description": "Prior",
+    "catalog_id": "FAKE-REMA",
+    "dealer_id": "faa0Ym",
+    "dealer": {
+     "id": "faa0Ym",
+     "color": "ffffff"
+    },
+    "pricing": {
+     "price": 39.9,
+     "pre_price": 44.9,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-r4"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-r5",
+    "heading": "GROVBRØD OPPSKÅRET",
+    "description": "Mesterbakeren, 700 g",
+    "catalog_id": "FAKE-REMA",
+    "dealer_id": "faa0Ym",
+    "dealer": {
+     "id": "faa0Ym",
+     "color": "ffffff"
+    },
+    "pricing": {
+     "price": 29.9,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": {
+     "unit": {
+      "symbol": "g",
+      "si": {
+       "symbol": "kg",
+       "factor": 0.001
+      }
+     },
+     "size": {
+      "from": 700,
+      "to": 700
+     },
+     "pieces": {
+      "from": 1,
+      "to": 1
+     }
+    },
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-r5"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   }
+  ],
+  "FAKE-KIWI": [
+   {
+    "id": "fake-k1",
+    "heading": "BANANER",
+    "description": "Pr kg 19,90",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 19.9,
+     "pre_price": 26.9,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-k1"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-k2",
+    "heading": "COCA-COLA UTEN SUKKER",
+    "description": "1,5 l",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 29.9,
+     "pre_price": 39.9,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-k2"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-k3",
+    "heading": "LAKSEFILET",
+    "description": "4 x 125 g",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 79.9,
+     "pre_price": 99.9,
+     "currency": "NOK"
+    },
+    "quantity": {
+     "unit": {
+      "symbol": "g",
+      "si": {
+       "symbol": "kg",
+       "factor": 0.001
+      }
+     },
+     "size": {
+      "from": 500,
+      "to": 500
+     },
+     "pieces": {
+      "from": 1,
+      "to": 1
+     }
+    },
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-k3"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-k4",
+    "heading": "TINE LETTMELK",
+    "description": "1 l",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 21.9,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-k4"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f0",
+    "heading": "TESTVARE NR 1",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 10,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f0"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f1",
+    "heading": "TESTVARE NR 2",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 11,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f1"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f2",
+    "heading": "TESTVARE NR 3",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 12,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f2"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f3",
+    "heading": "TESTVARE NR 4",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 13,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f3"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f4",
+    "heading": "TESTVARE NR 5",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 14,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f4"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f5",
+    "heading": "TESTVARE NR 6",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 15,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f5"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f6",
+    "heading": "TESTVARE NR 7",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 16,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f6"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f7",
+    "heading": "TESTVARE NR 8",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 17,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f7"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f8",
+    "heading": "TESTVARE NR 9",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 18,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f8"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f9",
+    "heading": "TESTVARE NR 10",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 19,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f9"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f10",
+    "heading": "TESTVARE NR 11",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 20,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f10"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f11",
+    "heading": "TESTVARE NR 12",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 21,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f11"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f12",
+    "heading": "TESTVARE NR 13",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 22,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f12"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f13",
+    "heading": "TESTVARE NR 14",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 23,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f13"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f14",
+    "heading": "TESTVARE NR 15",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 24,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f14"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f15",
+    "heading": "TESTVARE NR 16",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 25,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f15"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f16",
+    "heading": "TESTVARE NR 17",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 26,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f16"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f17",
+    "heading": "TESTVARE NR 18",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 27,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f17"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f18",
+    "heading": "TESTVARE NR 19",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 28,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f18"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f19",
+    "heading": "TESTVARE NR 20",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 29,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f19"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f20",
+    "heading": "TESTVARE NR 21",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 30,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f20"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f21",
+    "heading": "TESTVARE NR 22",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 31,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f21"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f22",
+    "heading": "TESTVARE NR 23",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 32,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f22"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f23",
+    "heading": "TESTVARE NR 24",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 33,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f23"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f24",
+    "heading": "TESTVARE NR 25",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 34,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f24"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f25",
+    "heading": "TESTVARE NR 26",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 35,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f25"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f26",
+    "heading": "TESTVARE NR 27",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 36,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f26"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f27",
+    "heading": "TESTVARE NR 28",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 37,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f27"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f28",
+    "heading": "TESTVARE NR 29",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 38,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f28"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f29",
+    "heading": "TESTVARE NR 30",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 39,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f29"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f30",
+    "heading": "TESTVARE NR 31",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 40,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f30"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f31",
+    "heading": "TESTVARE NR 32",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 41,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f31"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f32",
+    "heading": "TESTVARE NR 33",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 42,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f32"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f33",
+    "heading": "TESTVARE NR 34",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 43,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f33"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f34",
+    "heading": "TESTVARE NR 35",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 44,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f34"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f35",
+    "heading": "TESTVARE NR 36",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 45,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f35"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f36",
+    "heading": "TESTVARE NR 37",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 46,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f36"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f37",
+    "heading": "TESTVARE NR 38",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 47,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f37"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f38",
+    "heading": "TESTVARE NR 39",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 48,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f38"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f39",
+    "heading": "TESTVARE NR 40",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 49,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f39"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f40",
+    "heading": "TESTVARE NR 41",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 50,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f40"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f41",
+    "heading": "TESTVARE NR 42",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 51,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f41"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f42",
+    "heading": "TESTVARE NR 43",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 52,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f42"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f43",
+    "heading": "TESTVARE NR 44",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 53,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f43"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f44",
+    "heading": "TESTVARE NR 45",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 54,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f44"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f45",
+    "heading": "TESTVARE NR 46",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 55,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f45"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f46",
+    "heading": "TESTVARE NR 47",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 56,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f46"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f47",
+    "heading": "TESTVARE NR 48",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 57,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f47"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f48",
+    "heading": "TESTVARE NR 49",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 58,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f48"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f49",
+    "heading": "TESTVARE NR 50",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 59,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f49"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f50",
+    "heading": "TESTVARE NR 51",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 60,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f50"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f51",
+    "heading": "TESTVARE NR 52",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 61,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f51"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f52",
+    "heading": "TESTVARE NR 53",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 62,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f52"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f53",
+    "heading": "TESTVARE NR 54",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 63,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f53"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f54",
+    "heading": "TESTVARE NR 55",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 64,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f54"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f55",
+    "heading": "TESTVARE NR 56",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 65,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f55"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f56",
+    "heading": "TESTVARE NR 57",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 66,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f56"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f57",
+    "heading": "TESTVARE NR 58",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 67,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f57"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f58",
+    "heading": "TESTVARE NR 59",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 68,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f58"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f59",
+    "heading": "TESTVARE NR 60",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 69,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f59"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f60",
+    "heading": "TESTVARE NR 61",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 70,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f60"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f61",
+    "heading": "TESTVARE NR 62",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 71,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f61"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f62",
+    "heading": "TESTVARE NR 63",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 72,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f62"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f63",
+    "heading": "TESTVARE NR 64",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 73,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f63"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f64",
+    "heading": "TESTVARE NR 65",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 74,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f64"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f65",
+    "heading": "TESTVARE NR 66",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 75,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f65"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f66",
+    "heading": "TESTVARE NR 67",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 76,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f66"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f67",
+    "heading": "TESTVARE NR 68",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 77,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f67"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f68",
+    "heading": "TESTVARE NR 69",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 78,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f68"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   },
+   {
+    "id": "fake-f69",
+    "heading": "TESTVARE NR 70",
+    "description": "Fyllvare for test",
+    "catalog_id": "FAKE-KIWI",
+    "dealer_id": "257bxm",
+    "dealer": {
+     "id": "257bxm",
+     "color": "00a650"
+    },
+    "pricing": {
+     "price": 79,
+     "pre_price": null,
+     "currency": "NOK"
+    },
+    "quantity": null,
+    "images": {
+     "thumb": "https://image-transformer-api.tjek.com/?u=FAKE-fake-f69"
+    },
+    "run_from": "NOW-2D",
+    "run_till": "NOW+5D"
+   }
+  ]
+ }
+}

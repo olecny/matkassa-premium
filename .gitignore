@@ -1,0 +1,20 @@
+.env
+.env.*
+!.env.example
+*.local.json
+spending*.json
+offers*.json
+rema-offers*.json
+archive/
+data/
+screenshots/
+test/fixtures/
+node_modules/
+.DS_Store
+__pycache__/
+innsyn/
+test/tmp/
+# Clearly fake test fixtures are the only JSON data allowed in git.
+!test/fake/*-FAKE.json
+ingest/logs/
+test/tmp/

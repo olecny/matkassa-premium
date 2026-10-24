@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="nb">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Matkassa</title>
+  <meta name="description" content="Ukens mattilbud, handleliste og matforbruk.">
+  <meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#161615" media="(prefers-color-scheme: dark)">
+  <meta name="color-scheme" content="light dark">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Matkassa">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://squid-api.tjek.com" crossorigin>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-row">
+      <h1 id="view-title">Tilbud</h1>
+      <button id="refresh" class="icon-btn" type="button" aria-label="Oppdater tilbud" title="Oppdater tilbud">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>
+      </button>
+    </div>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+  </header>
+
+  <main>
+    <!-- Tilbud -->
+    <section id="view-tilbud" class="view" data-title="Tilbud">
+      <div id="geo-card" class="card geo-card" role="region" aria-label="Finn tilbud nær deg" hidden></div>
+      <div class="toolbar">
+        <label class="search">
+          <span class="sr-only">Søk i tilbud</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="offer-search" type="search" placeholder="Søk: melk, kylling, kaffe …" autocomplete="off" enterkeyhint="search">
+        </label>
+        <label class="sort">
+          <span class="sr-only">Sorter</span>
+          <select id="offer-sort">
+            <option value="fordeg">For deg</option>
+            <option value="relevans">Kjede A–Å</option>
+            <option value="pris">Laveste pris</option>
+            <option value="enhet">Laveste kilo-/literpris</option>
+            <option value="rabatt">Størst rabatt</option>
+          </select>
+        </label>
+      </div>
+      <div class="chips" id="chain-chips" role="group" aria-label="Filtrer på kjede"></div>
+      <div class="chips" id="cat-chips" role="group" aria-label="Filtrer på kategori"></div>
+      <section id="for-deg" class="for-deg" hidden aria-labelledby="for-deg-h">
+        <h2 id="for-deg-h">Tilbud for deg</h2>
+        <ul id="for-deg-list"></ul>
+      </section>
+      <p class="count" id="offer-count"></p>
+      <ul class="offers" id="offer-list"></ul>
+      <button id="offer-more" class="btn btn-ghost wide" type="button" hidden>Vis flere</button>
+      <div id="offer-empty" class="empty" hidden></div>
+    </section>
+
+    <!-- Handleliste -->
+    <section id="view-liste" class="view" data-title="Handleliste" hidden>
+      <form id="list-form" class="add-row" autocomplete="off">
+        <label class="sr-only" for="list-input">Ny vare</label>
+        <input id="list-input" type="text" placeholder="Legg til vare, f.eks. melk" enterkeyhint="done" maxlength="120">
+        <button class="btn btn-primary" type="submit">Legg til</button>
+      </form>
+      <p class="count" id="list-summary"></p>
+      <ul class="list" id="list-items"></ul>
+      <div id="list-empty" class="empty" hidden>
+        <h2>Handlelisten er tom</h2>
+        <p>Skriv inn en vare over, eller trykk <strong>+</strong> på et tilbud. Varer som er på tilbud denne uken blir merket med kjede og pris.</p>
+      </div>
+      <button id="list-clear" class="btn btn-ghost wide" type="button" hidden>Fjern avkryssede</button>
+    </section>
+
+    <!-- Forbruk -->
+    <section id="view-forbruk" class="view" data-title="Forbruk" hidden>
+      <div id="spend-body"></div>
+      <div class="actions">
+        <button class="btn btn-primary" type="button" data-action="import">Importer fil</button>
+        <button class="btn" type="button" data-action="manual">Ny kvittering</button>
+      </div>
+      <p class="hint">Importer støtter Trumf-innsyn (JSON), <code>spending.json</code> fra Mac-skriptet og Matkassa-backup. Alt lagres bare på denne enheten.</p>
+    </section>
+
+    <!-- Mer -->
+    <section id="view-mer" class="view" data-title="Mer" hidden>
+      <div id="more-body"></div>
+    </section>
+  </main>
+
+  <nav class="tabbar" aria-label="Hovedmeny">
+    <button type="button" data-tab="tilbud" aria-current="page">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12V4h8l10 10-8 8L3 12z"/><circle cx="7.5" cy="8.5" r="1.5"/></svg>
+      <span>Tilbud</span>
+    </button>
+    <button type="button" data-tab="liste">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/></svg>
+      <span>Handleliste</span><b class="badge" id="list-badge" hidden></b>
+    </button>
+    <button type="button" data-tab="forbruk">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+      <span>Forbruk</span>
+    </button>
+    <button type="button" data-tab="mer">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+      <span>Mer</span>
+    </button>
+  </nav>
+
+  <input id="file-input" type="file" accept=".json,application/json" hidden>
+
+  <dialog id="dlg-receipt" class="sheet">
+    <form method="dialog" id="receipt-form">
+      <h2>Legg inn kvittering</h2>
+      <label>Butikk
+        <input name="store" list="store-list" required placeholder="f.eks. KIWI Sentrum" autocomplete="off">
+      </label>
+      <datalist id="store-list"></datalist>
+      <div class="two">
+        <label>Dato <input name="date" type="date" required></label>
+        <label>Beløp (kr) <input name="total" inputmode="decimal" placeholder="0,00"></label>
+      </div>
+      <label>Kategori for hele kvitteringen
+        <select name="category"></select>
+      </label>
+      <label>Varelinjer (valgfritt)
+        <textarea name="lines" rows="4" placeholder="Én vare per linje: navn; beløp&#10;Tine lettmelk; 24,90&#10;Bananer; 18,40"></textarea>
+      </label>
+      <p class="hint">Med varelinjer blir hver vare kategorisert for seg. Står beløpet tomt, brukes summen av linjene.</p>
+      <p class="form-error" id="receipt-error" role="alert"></p>
+      <div class="dlg-actions">
+        <button class="btn" value="cancel" formnovalidate>Avbryt</button>
+        <button class="btn btn-primary" value="save" id="receipt-save">Lagre</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-rule" class="sheet">
+    <form method="dialog" id="rule-form">
+      <h2>Velg kategori</h2>
+      <p id="rule-item" class="rule-item"></p>
+      <label>Regel: varenavn som inneholder
+        <input name="pattern" required autocomplete="off">
+      </label>
+      <label class="check" id="rule-ean-row" hidden><input type="checkbox" name="useEan"> <span>Bruk strekkode (EAN) i stedet: <code id="rule-ean"></code></span></label>
+      <fieldset class="cat-pick" id="rule-cats"><legend class="sr-only">Kategori</legend></fieldset>
+      <div class="dlg-actions">
+        <button class="btn" value="cancel" formnovalidate>Avbryt</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-detail" class="sheet">
+    <div id="detail-body"></div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

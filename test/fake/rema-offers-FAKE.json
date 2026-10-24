@@ -1,0 +1,38 @@
+{
+ "schema": "matkassa.offers/1",
+ "_note": "FAKE TEST DATA – invented for Matkassa tests. Not a real person, store, receipt or token. EANs use the 200–299 in-store range, which is never on real products.",
+ "source": "rema-campaign",
+ "chain": "REMA 1000",
+ "offers": [
+  {
+   "id": "rema-sp-FAKE-1",
+   "title": "FILTERM KJELDSBERG",
+   "desc": "KJELDSBERG, 250 G, 139,60 PR. KG",
+   "price": 34.9,
+   "prePrice": null,
+   "unitPrice": 139.6,
+   "unit": "kg",
+   "from": "NOW-2D",
+   "till": "NOW+5D",
+   "img": null,
+   "eans": [
+    "2000000000015"
+   ]
+  },
+  {
+   "id": "rema-sp-FAKE-2",
+   "title": "TESTSJOKOLADE 6PK",
+   "desc": "TESTMERKE, 0,3 KG",
+   "price": 99,
+   "prePrice": null,
+   "unitPrice": null,
+   "unit": null,
+   "from": "NOW-2D",
+   "till": "NOW+5D",
+   "img": null,
+   "eans": [
+    "2000000000046"
+   ]
+  }
+ ]
+}

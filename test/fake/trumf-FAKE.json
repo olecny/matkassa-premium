@@ -1,0 +1,21 @@
+[
+ {
+  "_note": "FAKE TEST DATA – invented for Matkassa tests. Not a real person, store, receipt or token. EANs use the 200–299 in-store range, which is never on real products.",
+  "dato": "03.10.2026 12:05",
+  "kvitteringsnummer": "FAKE-A1",
+  "kjede": "KIWI",
+  "butikknavn": "KIWI TESTBUTIKK (FAKE)",
+  "varelinjer": [
+   {
+    "varenavn": "TINE LETTMELK",
+    "vareAntallVekt": "1,000",
+    "vareBelop": "24,90"
+   },
+   {
+    "varenavn": "PANT",
+    "vareAntallVekt": "1",
+    "vareBelop": "2,00"
+   }
+  ]
+ }
+]
