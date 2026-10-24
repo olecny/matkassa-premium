@@ -677,6 +677,7 @@ try {
   check(/ikke gyldig JSON/.test(await importFixture(path.join(FAKE, 'not-json-FAKE.json'))), 'bad import: not JSON → clear message');
   check(/Fant ingen kvitteringer/.test(await importFixture(path.join(FAKE, 'junk-FAKE.json'))), 'bad import: unknown JSON → clear message');
   check(/Trumf: 1 nye/.test(await importFixture(path.join(FAKE, 'trumf-FAKE.json'))), 'import: Trumf innsyn (fake)');
+  check(/Coop: 2 nye/.test(await importFixture(path.join(FAKE, 'coop-innsyn-FAKE.csv'))), 'import: Coop innsyn CSV (fake, guessed format)');
 
   // 3. Sync from a (fake) private repo with a (fake) token
   await tab('mer');

@@ -7,7 +7,7 @@ pass() { echo "PASS $1"; }
 bad() { echo "FAIL $1"; [ -n "${2:-}" ] && echo "$2" | head -5 | sed 's/^/     /'; fail=1; }
 
 # 1. Only app code, docs and FAKE fixtures are tracked.
-odd="$(git ls-files | grep -vE '^(index\.html|styles\.css|sw\.js|manifest\.webmanifest|README\.md|DESIGN\.md|\.gitignore|js/[a-z-]+\.js|icons/.*|test/(unit\.test\.mjs|e2e\.mjs|privacy\.sh|fake/[a-z-]+-FAKE\.json))$')"
+odd="$(git ls-files | grep -vE '^(index\.html|styles\.css|sw\.js|manifest\.webmanifest|README\.md|DESIGN\.md|\.gitignore|js/[a-z-]+\.js|icons/.*|supabase/(migrations/[0-9]+_[a-z_]+\.sql|schedule/[a-z_]+\.sql|tests/[a-z_]+\.sql)|test/(unit\.test\.mjs|e2e\.mjs|privacy\.sh|rls\.sh|fake-supabase\.mjs|fake/[a-z-]+-FAKE\.(json|csv)))$')"
 [ -z "$odd" ] && pass "git ls-files: only app code, docs and FAKE fixtures" || bad "unexpected tracked files" "$odd"
 
 # 2. Nothing sensitive is tracked, even if git-ignore rules change later.
@@ -26,7 +26,7 @@ hist="$(git log -p --all | grep -cE "$pat")"
 # 4. No Norwegian phone numbers, e-mail addresses or real EANs in tracked files (fake EANs use 2xx).
 phones="$(git grep -nIE '(\+47 ?)?[49][0-9]{2} ?[0-9]{2} ?[0-9]{3}\b' -- '*.json' '*.md' '*.html' | grep -v 'FAKE' | grep -vE '\b(7[0-9]{12})\b' | head -5)"
 [ -z "$phones" ] && pass "no phone-number-like strings in data/docs" || bad "phone-number-like strings" "$phones"
-mails="$(git grep -nIE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}' -- . ':!*.png' | grep -vE 'noreply@anthropic\.com|users\.noreply\.github\.com' | head -5)"
+mails="$(git grep -nIE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}' -- . ':!*.png' | grep -vE 'noreply@anthropic\.com|users\.noreply\.github\.com|@(example|fake)\.invalid' | head -5)"
 [ -z "$mails" ] && pass "no e-mail addresses" || bad "e-mail addresses in tracked files" "$mails"
 eans="$(git grep -nIhoE '"ean[s]?"\s*:\s*\[?\s*"[0-9]{8,14}"' -- test/fake | grep -vE '"2[0-9]{7,13}"' | head -5)"
 [ -z "$eans" ] && pass "fixtures only use fake 2xx EANs" || bad "real-looking EANs in fixtures" "$eans"

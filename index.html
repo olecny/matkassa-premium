@@ -94,7 +94,7 @@
         <button class="btn btn-primary" type="button" data-action="import">Importer fil</button>
         <button class="btn" type="button" data-action="manual">Ny kvittering</button>
       </div>
-      <p class="hint">Importer støtter Trumf-innsyn (JSON), <code>spending.json</code> fra Mac-skriptet og Matkassa-backup. Alt lagres bare på denne enheten.</p>
+      <p class="hint">Importer støtter Trumf-innsyn (JSON), Coop-innsyn (CSV/JSON), <code>spending.json</code> fra Mac-skriptet og Matkassa-backup. Alt lagres bare på denne enheten.</p>
     </section>
 
     <!-- Mer -->
@@ -127,7 +127,7 @@
     <span class="tab-indicator" id="tab-indicator" aria-hidden="true"></span>
   </nav>
 
-  <input id="file-input" type="file" accept=".json,application/json" hidden>
+  <input id="file-input" type="file" accept=".json,.csv,.txt,application/json,text/csv" hidden>
 
   <dialog id="dlg-receipt" class="sheet">
     <div class="grabber" aria-hidden="true"></div>

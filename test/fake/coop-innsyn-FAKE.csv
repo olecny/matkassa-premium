@@ -1,0 +1,5 @@
+Kvitteringsnummer;Dato;Klokkeslett;Butikk;Varenavn;EAN;Antall;Beløp;Totalbeløp
+FAKE-9001;03.10.2026;17:42;Coop Extra Testbyen (FAKE);TINE LETTMELK 1L (FAKE);2000000000107;2;"39,80";"112,70"
+FAKE-9001;03.10.2026;17:42;Coop Extra Testbyen (FAKE);GROVBRØD (FAKE);2000000000114;1;"32,90";"112,70"
+FAKE-9001;03.10.2026;17:42;Coop Extra Testbyen (FAKE);BANANER (FAKE);;1,2;"40,00";"112,70"
+FAKE-9002;11.10.2026;09:05;Coop Prix Eksempel (FAKE);KAFFE (FAKE);2000000000121;1;"59,90";"59,90"

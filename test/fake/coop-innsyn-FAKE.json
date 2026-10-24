@@ -1,0 +1,7 @@
+{
+  "_note": "FAKE TEST DATA. Guessed shape of a Coop innsyn export (the real format is not public).",
+  "kjøpshistorikk": [
+    { "dato": "2026-10-05T12:10:00", "butikk": "Coop Mega Fiktiv (FAKE)", "beløp": "245,50" },
+    { "dato": "2026-10-12T16:30:00", "butikk": "Coop Obs Fiktiv (FAKE)", "beløp": 812.0 }
+  ]
+}

@@ -1,6 +1,6 @@
 // Run: node test/unit.test.mjs   (no dependencies). All data here is FAKE test data.
 import fs from 'node:fs';
-import { detectImport, summarize, toNumber, mergeReceipts, monthCompare } from '../js/spending.js';
+import { detectImport, detectImportText, summarize, toNumber, mergeReceipts, monthCompare, parseCSV, dedupeReceipts } from '../js/spending.js';
 import { makeClassifier, DEFAULT_CATEGORIES, tokens } from '../js/categories.js';
 import { buildProfile, scoreOffer, normEan, productKey } from '../js/profile.js';
 import { parseExtraOffers, mergeExtraOffers, eanCoverage } from '../js/extra-offers.js';
@@ -219,6 +219,34 @@ ok(rb(100) < 100 && rb(400) - rb(300) < rb(100) - rb(0), 'sheet: dragging up rub
   await c.push('receipts', Array.from({ length: 450 }, (_, i) => ({ id: 'n' + i, data: { id: 'n' + i } })));
   const posts = calls.filter((x) => x.method === 'POST');
   ok(posts.length === 3 && JSON.parse(posts[0].body).every((r) => r.user_id === 'u1') && /merge-duplicates/.test(posts[0].headers.Prefer), 'cloud client: upserts in chunks of 200 with the user id');
+}
+
+/* ---------- Coop innsyn importer (FAKE fixtures; real format unverified) + cross-source dedupe ---------- */
+{
+  const csv = fs.readFileSync(new URL('./fake/coop-innsyn-FAKE.csv', import.meta.url), 'utf8');
+  const c = detectImportText(csv);
+  ok(c.kind === 'coop' && c.data.length === 2, 'coop: CSV with one row per product line → 2 receipts', JSON.stringify(c.data.map((r) => r.id)));
+  const r1 = c.data.find((r) => r.id === 'coop-FAKE-9001');
+  ok(r1 && r1.date === '2026-10-03' && r1.time === '17:42' && r1.total === 112.7 && r1.lines.length === 3 && r1.chain === 'Coop Extra' && r1.source === 'coop', 'coop: date, time, total, chain from the store name');
+  ok(r1.lines[0].ean === '2000000000107' && r1.lines[0].qty === 2 && r1.lines[2].ean === null && r1.lines[2].qty === 1.2, 'coop: barcodes, quantities, missing EAN');
+  const j = detectImportText(fs.readFileSync(new URL('./fake/coop-innsyn-FAKE.json', import.meta.url), 'utf8'));
+  ok(j.kind === 'coop' && j.data.length === 2 && j.data[0].total === 245.5 && j.data[1].chain === 'Coop Obs', 'coop: JSON with one row per purchase');
+  const q = parseCSV('a,b\n"x, y","z ""q"""\n')[0];
+  ok(q.a === 'x, y' && q.b === 'z "q"', 'csv: quotes and escaped quotes');
+  let err = '';
+  try { detectImportText('dato;noe\nikke en dato;x\n'); } catch (e) { err = e.message; }
+  ok(/CSV/.test(err), 'coop: CSV without receipts gives a clear message', err);
+  // the same purchase from Trumf innsyn and trumf.py (different id schemes) collapses to the richer copy
+  const innsyn = { id: 'trumf-123456', source: 'trumf', chain: 'KIWI', store: 'KIWI 412 (FAKE)', date: '2026-10-02', time: '17:31', total: 254.3, lines: [{ name: 'MELK', amount: 254.3 }] };
+  const api = { id: 'trumf-b987', source: 'trumf', chain: 'Kiwi', store: 'Kiwi 412 (FAKE)', date: '2026-10-02', time: '17:32', total: 254.3, lines: [{ name: 'MELK', ean: '2000000000107', amount: 254.3 }] };
+  const later = { ...api, id: 'trumf-b988', time: '19:10' };
+  const manual = { id: 'm1', source: 'manual', chain: 'REMA 1000', store: 'REMA 1000', date: '2026-10-02', total: 99, lines: [] };
+  const rema = { id: 'rema-55', source: 'rema', chain: 'REMA 1000', store: 'REMA 1000 Test (FAKE)', date: '2026-10-02', time: '12:00', total: 99, lines: [{ name: 'X', ean: '2000000000114', amount: 99 }] };
+  const d = dedupeReceipts([innsyn, api, later, manual, rema]);
+  ok(d.removed.sort().join() === 'm1,trumf-123456', 'dedupe: same day/chain/total/time ±3 min → one; keeps the copy with barcodes', d.removed.join());
+  ok(d.receipts.some((r) => r.id === 'trumf-b988'), 'dedupe: same total two hours later is a different purchase');
+  const m = mergeReceipts([innsyn], [api, later]);
+  ok(m.receipts.length === 2 && m.duplicates === 1, 'dedupe: merge reports collapsed duplicates', JSON.stringify({ n: m.receipts.length, d: m.duplicates, a: m.added }));
 }
 
 console.log(failed ? `\n${failed} FAILED` : '\nAll unit tests passed');
