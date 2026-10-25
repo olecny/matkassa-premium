@@ -114,3 +114,83 @@ export function exitRow(el) {
     { duration: 160, easing: EASE_OUT, fill: 'forwards' },
   ).finished.catch(() => {});
 }
+
+/** A short buzz where the device can (Android; iOS Safari ignores it). Never with reduced motion. */
+export function haptic(ms = 8) {
+  // only after the user has touched the page (browsers block it before, with a console warning)
+  try { if (!reducedMotion() && navigator.vibrate && (!navigator.userActivation || navigator.userActivation.hasBeenActive)) navigator.vibrate(ms); } catch (e) { /* not allowed here */ }
+}
+
+// Overshoots a little and settles: the row springs back like a native list cell.
+export const SPRING = 'cubic-bezier(0.34, 1.36, 0.64, 1)';
+export const SWIPE_COMMIT = 84; // px: past this, letting go checks off (right) or deletes (left)
+
+/**
+ * Swipe list rows: right = check off / undo, left = delete. The row follows the finger 1:1 (rubber band past the
+ * commit point), a buzz marks the point where letting go will act, and on release it springs back or slides out.
+ * Vertical scrolling is untouched (touch-action: pan-y on the row; a mostly vertical move hands over to the page).
+ * A swipe never also counts as a tap on the tick or the offer line underneath.
+ */
+export function enableSwipe(list, { onDone, onDelete, haptic: buzz = haptic }) {
+  let s = null; // {id, row, li, x0, y0, dx, live, armed, pid, samples}
+  let swallowClick = false;
+  list.addEventListener('pointerdown', (e) => {
+    if (s || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    const row = e.target.closest('.item > .row');
+    if (!row || e.target.closest('.qty, input, details[open] ul')) return;
+    const li = row.parentElement;
+    s = { id: li.dataset.item, row, li, x0: e.clientX, y0: e.clientY, dx: 0, live: false, armed: 0, pid: e.pointerId, samples: [{ t: performance.now(), y: e.clientX }] };
+  });
+  list.addEventListener('pointermove', (e) => {
+    if (!s || e.pointerId !== s.pid) return;
+    const dx = e.clientX - s.x0;
+    const dy = e.clientY - s.y0;
+    if (!s.live) {
+      if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { s = null; return; } // a scroll
+      if (Math.abs(dx) < 10) return;
+      s.live = true;
+      try { s.row.setPointerCapture(s.pid); } catch (err) { /* synthetic events */ }
+      s.li.classList.add('swiping');
+    }
+    s.samples.push({ t: performance.now(), y: e.clientX });
+    if (s.samples.length > 20) s.samples.shift();
+    const w = s.row.offsetWidth;
+    const over = Math.abs(dx) - SWIPE_COMMIT * 1.4;
+    s.dx = over > 0 ? Math.sign(dx) * (SWIPE_COMMIT * 1.4 + rubberband(over, w)) : dx;
+    s.row.style.transform = `translateX(${s.dx}px)`;
+    s.li.classList.toggle('sw-right', s.dx > 0);
+    s.li.classList.toggle('sw-left', s.dx < 0);
+    const armed = Math.abs(s.dx) >= SWIPE_COMMIT ? Math.sign(s.dx) : 0;
+    if (armed !== s.armed) { s.armed = armed; s.li.classList.toggle('armed', !!armed); if (armed) buzz(10); }
+  });
+  const end = (e) => {
+    if (!s || e.pointerId !== s.pid) return;
+    const { row, li, id, live } = s;
+    // A quick flick counts even before the commit point.
+    const v = releaseVelocity(s.samples, performance.now());
+    const act = s.armed || (Math.abs(s.dx) > 30 && Math.abs(v) > 0.5 && Math.sign(v) === Math.sign(s.dx) ? Math.sign(s.dx) : 0);
+    const from = s.dx;
+    s = null;
+    if (!live) return;
+    swallowClick = true;
+    setTimeout(() => (swallowClick = false), 0);
+    li.classList.remove('swiping', 'armed');
+    const settle = () => { row.style.transform = ''; li.classList.remove('sw-left', 'sw-right'); };
+    if (act < 0) {
+      if (reducedMotion() || !row.animate) { settle(); onDelete(id, li); return; }
+      row.animate([{ transform: `translateX(${from}px)` }, { transform: 'translateX(-105%)' }], { duration: 200, easing: EASE_OUT, fill: 'forwards' })
+        .finished.catch(() => {}).then(() => onDelete(id, null));
+      return;
+    }
+    if (reducedMotion() || !row.animate) settle();
+    else {
+      row.style.transform = '';
+      row.animate([{ transform: `translateX(${from}px)` }, { transform: 'none' }], { duration: 380, easing: SPRING }).finished.catch(() => {}).then(settle);
+    }
+    if (act > 0) onDone(id);
+  };
+  list.addEventListener('pointerup', end);
+  list.addEventListener('pointercancel', end);
+  // the click that ends a swipe must not also toggle the tick or open the offer line
+  list.addEventListener('click', (e) => { if (swallowClick) { e.preventDefault(); e.stopPropagation(); } }, true);
+}

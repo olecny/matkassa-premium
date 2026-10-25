@@ -1,14 +1,14 @@
 import * as db from './db.js';
 import { fetchOffers, AREAS, DEFAULT_AREA } from './tjek.js';
-import { DEFAULT_CATEGORIES, makeClassifier, normalize, tokens } from './categories.js';
-import { buildProfile, scoreOffer, normEan } from './profile.js';
+import { DEFAULT_CATEGORIES, NON_FOOD, CATEGORY_VERSION, migrateCategories, makeClassifier, normalize, tokens, matchOffer, parseQty, qtyStep, qtyText, pastedLines } from './categories.js';
+import { buildProfile, scoreOffer, normEan, productKey } from './profile.js';
 import { parseExtraOffers, mergeExtraOffers, eanCoverage } from './extra-offers.js';
-import { defaultSettings, mergeSettings, validArea } from './settings.js';
+import { defaultSettings, mergeSettings, validArea, validBudget } from './settings.js';
 import { detectImport, detectImportText, mergeReceipts, summarize, monthCompare, toNumber, UNCAT, BACKUP_SCHEMA } from './spending.js';
 import { Cloud, cloudConfigured, reconcile, pickSettings, hash, COLLECTIONS } from './cloud.js';
-import { enableSheetDrag, watchLargeTitle, moveTabIndicator, exitRow, flip } from './motion.js';
+import { enableSheetDrag, watchLargeTitle, moveTabIndicator, exitRow, flip, enableSwipe, haptic } from './motion.js';
 
-const APP_VERSION = '0.6.0-premium.1';
+const APP_VERSION = '0.6.1-premium';
 const STALE_MS = 6 * 60 * 60 * 1000;
 const PAGE = 60;
 const TABS = ['hjem', 'tilbud', 'liste', 'forbruk', 'mer'];
@@ -27,11 +27,13 @@ const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${Stri
 
 const state = {
   tab: 'hjem',
+  morePage: null, // Mer subpage (null = the list)
   offersData: null, // {fetchedAt, chains, offers}
   list: [],
   categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
   rules: [],
   receipts: [],
+  savings: [], // [{id, at, kr, text}] offers checked off on the list (this device only)
   settings: defaultSettings(), // no personal defaults (see js/settings.js)
   extraOffers: null, // {fetchedAt, source, offers} from the user's data repo (REMA Superpris with barcodes)
   q: '',
@@ -58,6 +60,11 @@ const save = {
   settings: () => synced(db.set('settings', state.settings)),
 };
 
+/** "Større tekst" in Mer: scales all rem-based text (the whole UI) by about 18 %. */
+function applyTextSize() {
+  document.documentElement.classList.toggle('big-text', !!state.settings.bigText);
+}
+
 function rebuildClassifier() {
   classify = makeClassifier(state.categories, state.rules);
   rebuildOfferIndex();
@@ -75,7 +82,7 @@ function rebuildOfferIndex() {
   offerIndex = offers.map((o) => ({
     o,
     words: tokens(o.title),
-    hay: normalize(o.title + ' ' + o.desc),
+    desc: tokens(o.desc),
     cat: classify(o.title) || classify(o.title + ' ' + o.desc) || 'annet',
   }));
 }
@@ -108,6 +115,9 @@ const activeOffers = () => {
   const hidden = hiddenChains();
   return offerIndex.filter((x) => (!x.o.till || x.o.till >= now) && !hidden.has(x.o.chainId));
 };
+const foodOnly = () => state.settings.foodOnly !== false;
+/** "Kun mat" (default on) hides non-food: household, pet food, flowers, clothes, toys … */
+const isFood = (x) => !NON_FOOD.has(x.cat);
 
 /* ---------- personal fit: learn from receipts ---------- */
 const FIT_MIN = 0.2; // below this an offer isn't "for you"
@@ -142,11 +152,14 @@ function featuredOffers(n = 10) {
   const now = Date.now();
   const chains = selectedChains();
   const ranked = activeOffers()
-    .filter((x) => x.fit >= FIT_MIN && (!x.o.from || x.o.from <= now) && (!chains.size || chains.has(x.o.chainId)))
+    .filter((x) => x.fit >= FIT_MIN && (!x.o.from || x.o.from <= now) && (!chains.size || chains.has(x.o.chainId)) && (!foodOnly() || isFood(x)))
     .sort((a, b) => b.fit * (1 + discount(b.o)) - a.fit * (1 + discount(a.o)));
+  const titles = new Set(); // the same product at several chains: show the best one only
   for (const x of ranked) {
-    if (seen.has(x.because.name)) continue;
+    const t = productKey(x.o.title);
+    if (seen.has(x.because.name) || titles.has(t)) continue;
     seen.add(x.because.name);
+    titles.add(t);
     out.push(x);
     if (out.length === n) break;
   }
@@ -157,14 +170,18 @@ function featuredOffers(n = 10) {
 // Enters from below and leaves the same way (styles.css .toast). The timer pauses while the app is hidden, so a
 // message isn't missed when the user switches away right after an action.
 const TOAST_MS = 2600;
+const toastMs = (msg) => Math.min(12000, Math.max(TOAST_MS, String(msg).length * 55)); // long messages stay readable
 let toastTimer;
-function toast(msg) {
+let toastAction = null;
+/** Show a message; action = {label, run} adds a button (e.g. "Angre" after a delete). */
+function toast(msg, action = null) {
   const t = $('#toast');
-  t.textContent = msg;
+  toastAction = action;
+  t.innerHTML = `<span>${esc(msg)}</span>${action ? `<button type="button" class="toast-act">${esc(action.label)}</button>` : ''}`;
   t.classList.remove('leaving');
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(hideToast, TOAST_MS);
+  toastTimer = setTimeout(hideToast, toastMs(msg));
 }
 function hideToast() {
   const t = $('#toast');
@@ -178,6 +195,7 @@ function hideToast() {
 /* ---------- tabs ---------- */
 let homeEnterTimer;
 function showTab(tab) {
+  if (tab === 'mer') state.morePage = null; // the Mer tab always opens on its list, like iOS Settings
   state.tab = tab;
   for (const v of document.querySelectorAll('.view')) v.hidden = v.id !== `view-${tab}`;
   for (const b of document.querySelectorAll('.tabbar button')) {
@@ -186,7 +204,7 @@ function showTab(tab) {
   }
   $('#view-title').textContent = $('#bar-title').textContent = $(`#view-${tab}`).dataset.title;
   moveTabIndicator($('#tab-indicator'), TABS.indexOf(tab));
-  $('#refresh').hidden = tab !== 'tilbud' && tab !== 'liste';
+  $('#refresh').hidden = tab !== 'tilbud';
   $('#geo-card').classList.toggle('off-tab', tab !== 'hjem' && tab !== 'tilbud');
   if (tab === 'hjem') { // the staggered arrival plays once per visit, not on every re-render
     const hb = $('#home-body');
@@ -211,15 +229,27 @@ function render() {
   if (state.tab === 'mer') renderMore();
 }
 
+const longDay = new Intl.DateTimeFormat('nb-NO', { weekday: 'long', day: 'numeric', month: 'long' });
+/** Each tab has its own subtitle; only Tilbud talks about offers and loading. */
 function renderStatus() {
   const el = $('#status');
   const d = state.offersData;
+  $('#refresh').classList.toggle('spinning', !!state.loading);
+  if (state.tab !== 'tilbud') {
+    const open = state.list.filter((i) => !i.done).length;
+    el.textContent = {
+      hjem: titleCaseFirst(longDay.format(new Date())),
+      liste: state.list.length ? `${open} ${open === 1 ? 'vare' : 'varer'} igjen` : 'Det du skal handle',
+      forbruk: 'Hva du bruker på mat',
+      mer: state.morePage ? '' : 'Innstillinger og personvern',
+    }[state.tab] || '';
+    return;
+  }
   if (state.loading) el.textContent = state.loading;
   else if (state.error && d) el.textContent = `Viser lagrede tilbud fra ${timeFmt.format(d.fetchedAt)} · ${state.error}`;
   else if (state.error) el.textContent = state.error;
   else if (d) el.textContent = `${activeOffers().length} tilbud fra ${knownChains().filter((c) => !hiddenChains().has(c.id)).length} kjeder · oppdatert ${timeFmt.format(d.fetchedAt)}`;
   else el.textContent = '';
-  $('#refresh').classList.toggle('spinning', !!state.loading);
 }
 
 /* ---------- offers ---------- */
@@ -261,10 +291,13 @@ function filteredOffers() {
   ensureFit();
   const chains = selectedChains();
   const qTokens = tokens(state.q);
-  let list = activeOffers().filter((x) => (!chains.size || chains.has(x.o.chainId)) && (!state.cat || x.cat === state.cat));
+  // An explicitly picked non-food category shows its offers even with "Kun mat" on.
+  const food = foodOnly() && !(state.cat && NON_FOOD.has(state.cat));
+  let list = activeOffers().filter((x) => (!chains.size || chains.has(x.o.chainId)) && (!state.cat || x.cat === state.cat) && (!food || isFood(x)));
   if (qTokens.length) {
+    const qCat = classify(state.q);
     list = list
-      .map((x) => ({ x, s: matchScore(qTokens, x) }))
+      .map((x) => ({ x, s: matchOffer(qTokens, qCat, x.words, x.cat, { prefix: true, desc: x.desc }) }))
       .filter((r) => r.s > 0)
       .sort((a, b) => b.s - a.s)
       .map((r) => r.x);
@@ -281,21 +314,6 @@ function filteredOffers() {
 }
 const discount = (o) => (o.prePrice && o.prePrice > o.price ? (o.prePrice - o.price) / o.prePrice : 0);
 
-/** Word match: every query token must hit a word in the title (whole word, or start/end of a compound) or the description. */
-function matchScore(qTokens, x) {
-  let score = 0;
-  for (const t of qTokens) {
-    let best = 0;
-    for (const w of x.words) {
-      if (w === t) { best = 3; break; }
-      if (t.length >= 3 && (w.startsWith(t) || w.endsWith(t))) best = Math.max(best, 2);
-    }
-    if (!best && t.length >= 3 && x.hay.includes(t)) best = 0.5;
-    if (!best) return 0;
-    score += best;
-  }
-  return score;
-}
 
 function chainColor(id, fallback) {
   const c = state.offersData && state.offersData.chains.find((x) => x.id === id);
@@ -322,8 +340,8 @@ function inList(offerId) {
 /** Why an offer is "for you". via 'ean' = the same barcode is on your receipts, 'name' = similar name. */
 function whyText(because, via) {
   return via === 'ean'
-    ? `Du kjøper denne (${because.n}×) <span class="via" title="Samme strekkode som på kvitteringene dine">strekkode</span>`
-    : `Du kjøper ofte ${esc(because.name)} (${because.n}×)`;
+    ? `Du kjøper akkurat denne (${because.n}×) <span class="via" title="Samme strekkode som på kvitteringene dine">strekkode</span>`
+    : `Fordi du kjøper ${esc(because.name.toLowerCase())} (${because.n}×)`;
 }
 
 function offerCard({ o, fit, because, via }) {
@@ -373,10 +391,12 @@ function renderChips() {
       .join('');
   const counts = new Map();
   for (const x of activeOffers()) if (!sel.size || sel.has(x.o.chainId)) counts.set(x.cat, (counts.get(x.cat) || 0) + 1);
+  const food = foodOnly();
   $('#cat-chips').innerHTML =
+    `<button class="chip food-chip" type="button" data-foodonly aria-pressed="${food}" title="Skjul blomster, klær, dyremat og husholdning">Kun mat</button>` +
     `<button class="chip" type="button" data-cat="" aria-pressed="${!state.cat}">Alle varer</button>` +
     state.categories
-      .filter((c) => counts.get(c.id))
+      .filter((c) => counts.get(c.id) && !(food && NON_FOOD.has(c.id) && state.cat !== c.id))
       .map((c) => `<button class="chip" type="button" data-cat="${esc(c.id)}" aria-pressed="${state.cat === c.id}"><span class="dot" style="--c:${esc(c.color)}"></span>${esc(c.name)}</button>`)
       .join('');
   $('#chain-chips').hidden = $('#cat-chips').hidden = !d;
@@ -387,13 +407,16 @@ function renderOffers() {
   const empty = $('#offer-empty');
   const listEl = $('#offer-list');
   const more = $('#offer-more');
+  const skel = $('#offer-skeleton');
+  skel.hidden = !!(state.offersData || !state.loading);
+  if (!skel.hidden && !skel.firstChild) skel.innerHTML = '<div class="sk-card"><i></i><b></b></div>'.repeat(6);
   if (!state.offersData) {
     listEl.innerHTML = '';
     more.hidden = true;
     $('#offer-count').textContent = '';
-    empty.hidden = false;
+    empty.hidden = !!state.loading; // the skeleton shows while loading
     empty.innerHTML = state.loading
-      ? '<h2>Henter ukens tilbud …</h2><p>Første gang tar det noen sekunder. Etterpå ligger tilbudene lagret, så de vises også uten nett.</p>'
+      ? ''
       : `<h2>Ingen tilbud ennå</h2><p>${navigator.onLine ? 'Klarte ikke å hente tilbud fra Tjek.' : 'Du er frakoblet. Tilbud hentes når du er på nett igjen.'}</p><button class="btn btn-primary" type="button" data-action="refresh">Prøv igjen</button>`;
     return;
   }
@@ -408,51 +431,44 @@ function renderOffers() {
   empty.hidden = list.length > 0;
   if (!list.length) {
     empty.innerHTML = allChainsHidden()
-      ? '<h2>Alle kjeder er skjult</h2><p>Du har skjult alle kjedene. Slå på kjedene du handler i under Mer → Kjeder.</p><button class="btn btn-primary" type="button" data-gototab="mer">Gå til Mer → Kjeder</button>'
+      ? '<h2>Alle kjeder er skjult</h2><p>Du har skjult alle kjedene. Slå på kjedene du handler i under Mer → Kjeder.</p><button class="btn btn-primary" type="button" data-morego="kjeder">Gå til Mer → Kjeder</button>'
       : `<h2>Ingen treff</h2><p>Prøv et annet søkeord${state.cat || (state.settings.chains || []).length ? ', eller fjern filteret for kjede eller kategori' : ''}.</p>`;
   }
 }
 
 /* ---------- shopping list ---------- */
 const STOP = new Set(['og', 'i', 'på', 'med', 'til', 'stk', 'pk', 'kg', 'g', 'l', 'liter', 'x']);
+/** The product part of a list item: "2 l melk" → "melk" (old items may still have the amount in the text). */
+const itemName = (i) => (i.qty != null ? i.text : parseQty(i.text).name);
+/** Multiplier for a price: 3 stk = 3 packs; 500 g or 2 l is one pack's worth (the size is in the offer). */
+const packs = (i) => (i.qty != null && (!i.unit || i.unit === 'stk' || i.unit === 'pk') ? i.qty : 1);
 
 /**
  * Offers for a shopping-list item. Barcode first: an item added from an offer remembers that offer's EANs, so the
- * same product is found again in later weeks (marked o.via = 'ean'). Name-based matching is the fallback.
+ * same product is found again in later weeks (marked o.via = 'ean'). Then by name: whole words or the head of a
+ * compound, and never a different kind of product (see matchOffer in categories.js). Non-food offers only for a
+ * non-food item.
  */
 function dealsFor(text, eans) {
   const now = Date.now();
   const chains = selectedChains();
-  const live = activeOffers().filter((x) => (!chains.size || chains.has(x.o.chainId)) && (!x.o.from || x.o.from <= now + 7 * 864e5));
+  const name = parseQty(text).name;
+  const itemCat = classify(name); // "melk" → Meieri, so milk beats "potetmos med melk"
+  const food = !(itemCat && NON_FOOD.has(itemCat));
+  const live = activeOffers().filter((x) => (!chains.size || chains.has(x.o.chainId)) && (!x.o.from || x.o.from <= now + 7 * 864e5) && (!food || isFood(x)));
   const want = new Set((eans || []).map(normEan).filter(Boolean));
   const byEan = want.size ? live.filter((x) => (x.o.eans || []).some((e) => want.has(e))) : [];
   const eanIds = new Set(byEan.map((x) => x.o.id));
   const cheap = (a, b) => (a.o.unitPrice ?? a.o.price * 10) - (b.o.unitPrice ?? b.o.price * 10);
-  const first = byEan.sort(cheap).map((x) => ({ ...x.o, via: 'ean' }));
-  const q = tokens(text).filter((t) => t.length >= 2 && !STOP.has(t) && !/^\d+$/.test(t));
+  const first = byEan.sort(cheap).map((x) => ({ ...x.o, via: 'ean', cat: x.cat }));
+  const q = tokens(name).filter((t) => t.length >= 2 && !STOP.has(t) && !/^\d+$/.test(t));
   if (!q.length) return first;
-  const itemCat = classify(text); // "melk" → Meieri, so milk beats "potetmos med melk"
   return first.concat(live
     .filter((x) => !eanIds.has(x.o.id))
-    .map((x) => ({ x, s: titleScore(q, x) }))
+    .map((x) => ({ x, s: matchOffer(q, itemCat, x.words, x.cat) }))
     .filter((r) => r.s > 0)
-    .map((r) => (itemCat && r.x.cat === itemCat ? { x: r.x, s: r.s + 2 } : r))
     .sort((a, b) => b.s - a.s || cheap(a.x, b.x))
-    .map((r) => r.x.o));
-}
-function titleScore(q, x) {
-  let score = 0;
-  for (const t of q) {
-    let best = 0;
-    for (const w of x.words) {
-      if (w === t) { best = 3; break; }
-      // Norwegian compounds put the head last: "lettmelk" is milk, "melkesjokolade" is not.
-      if (t.length >= 3 && w.endsWith(t)) best = 2;
-    }
-    if (!best) return 0;
-    score += best;
-  }
-  return score;
+    .map((r) => ({ ...r.x.o, cat: r.x.cat })));
 }
 
 /** Update every + button for this offer in place (list and "Tilbud for deg"), so the + → ✓ change can animate. */
@@ -466,14 +482,18 @@ function syncAddButtons(o) {
 }
 
 let justAdded = null; // id of the list row that should animate in on the next render
+/** Add a typed line ("2 l melk") or an offer. Typed amounts are kept apart from the name, so matching stays right. */
 function addItem(text, offer) {
-  text = text.trim();
-  if (!text) return;
+  text = String(text || '').trim();
+  if (!text) return null;
   const eans = offer && offer.eans && offer.eans.length ? offer.eans : undefined;
+  const p = offer ? { name: text, qty: null, unit: null } : parseQty(text);
   const id = uid();
   justAdded = id;
-  state.list.unshift({ id, text, done: false, added: Date.now(), offer: offer || null, eans });
+  const item = { id, text: p.name, qty: p.qty, unit: p.unit, done: false, added: Date.now(), offer: offer || null, eans };
+  state.list.unshift(item);
   save.list();
+  return item;
 }
 
 function renderBadge() {
@@ -483,56 +503,188 @@ function renderBadge() {
   b.textContent = open;
 }
 
-function dealHTML(item) {
+/** Everything the list needs about one item, computed once per render: deals, the offer to show, category. */
+function itemInfo(i) {
   const now = Date.now();
-  if (linkedOffer(item)) {
-    const o = item.offer;
-    const expired = o.till && o.till < now;
-    if (expired && item.eans) {
-      const again = dealsFor(item.text, item.eans).filter((d) => d.via === 'ean');
-      if (again.length) return `<div class="deal"><span class="deal-tag">På tilbud igjen hos ${esc(again[0].chain)} – ${kr(again[0].price)}</span><span class="via" title="Samme strekkode">strekkode</span></div>`;
-    }
-    return `<div class="deal"><span class="deal-tag from">${expired ? 'Tilbudet er utløpt' : `Tilbud hos ${esc(o.chain)} – ${kr(o.price)}`}</span>${!expired && o.till ? `<span class="deal-more">til ${esc(dayFmt.format(o.till))}</span>` : ''}</div>`;
+  const linked = linkedOffer(i);
+  let deals = [];
+  let shown = null; // {chain, chainId, price, prePrice, title, via, linked}
+  if (linked && !(linked.till && linked.till < now)) shown = { ...linked, linked: true };
+  else {
+    deals = dealsFor(i.text, i.eans);
+    if (linked && i.eans) deals = deals.filter((d) => d.via === 'ean'); // an expired offer comes back only as the same product
+    if (deals.length) shown = deals[0];
   }
-  const deals = dealsFor(item.text, item.eans);
-  if (!deals.length) return state.offersData ? '<div class="nodeal">Ikke på tilbud denne uken</div>' : '';
+  const cat = classify(itemName(i)) || (shown && shown.cat) || (linked && classify(linked.title)) || 'annet';
+  return { linked, expired: !!(linked && linked.till && linked.till < now), deals, shown, cat };
+}
+
+function dealHTML(i, info) {
+  const { linked, expired, deals, shown } = info;
+  if (shown && shown.linked) {
+    return `<div class="deal"><span class="deal-tag from">Tilbud hos ${esc(shown.chain)} · ${kr(shown.price)}</span>${shown.till ? `<span class="deal-more">til ${esc(dayFmt.format(shown.till))}</span>` : ''}</div>`;
+  }
+  if (!deals.length) {
+    if (linked && expired) return '<div class="nodeal">Tilbudet er utløpt</div>';
+    return state.offersData ? '<div class="nodeal">Ikke på tilbud denne uken</div>' : '';
+  }
   const best = deals[0];
   const rest = deals.slice(0, 6);
-  return `<details class="deal"><summary><span class="deal-tag">På tilbud hos ${esc(best.chain)} – ${kr(best.price)}</span>
-    <span class="deal-what">${best.via === 'ean' ? '<span class="via" title="Samme strekkode">strekkode</span> ' : ''}${esc(titleCase(best.title))}${best.unitPrice ? ` · ${unitText(best)}` : ''}${deals.length > 1 ? ` · <u>+${deals.length - 1} til</u>` : ''}</span></summary>
-    <ul>${rest.map((o) => `<li><span>${esc(o.chain)}: ${esc(titleCase(o.title))}${o.unitPrice ? ` · ${unitText(o)}` : ''}</span><b>${kr(o.price)}</b></li>`).join('')}</ul></details>`;
+  const again = linked && expired ? 'igjen ' : '';
+  return `<details class="deal"><summary><span class="deal-tag">På tilbud ${again}hos ${esc(best.chain)} · ${kr(best.price)}</span>${best.via === 'ean' ? '<span class="via" title="Samme strekkode">strekkode</span>' : ''}${deals.length > 1 ? `<u>+${deals.length - 1}</u>` : ''}</summary>
+    <ul>${rest.map((o) => `<li><span class="dc">${esc(o.chain)}</span><span class="dt">${esc(titleCase(o.title))}${o.unitPrice ? `<small>${unitText(o)}</small>` : ''}</span><b>${kr(o.price)}</b></li>`).join('')}</ul></details>`;
+}
+
+function itemRow(i, info) {
+  const q = qtyText(i.qty, i.unit);
+  const canDec = i.qty != null && i.qty - qtyStep(i.unit) >= qtyStep(i.unit) - 1e-9;
+  return `<li class="item${i.done ? ' done' : ''}${i.id === justAdded ? ' new' : ''}" data-item="${esc(i.id)}">
+    <div class="swipe-bg" aria-hidden="true"><span class="sw-done">${i.done ? 'Angre' : 'Kryss av'}</span><span class="sw-del">Slett</span></div>
+    <div class="row">
+      <label class="tick"><input type="checkbox" data-toggle="${esc(i.id)}" ${i.done ? 'checked' : ''} aria-label="Kryss av ${esc(i.text)}"></label>
+      <div class="body"><div class="name">${esc(i.text)}</div>${dealHTML(i, info)}</div>
+      <div class="qty" role="group" aria-label="Mengde for ${esc(i.text)}">
+        <button type="button" data-dec="${esc(i.id)}" aria-label="Mindre ${esc(i.text)}"${canDec ? '' : ' disabled'}>−</button>
+        <span class="qv" aria-live="polite">${esc(q)}</span>
+        <button type="button" data-inc="${esc(i.id)}" aria-label="Mer ${esc(i.text)}">+</button>
+      </div>
+      <button class="del sr-only" type="button" data-del="${esc(i.id)}" aria-label="Slett ${esc(i.text)}">×</button>
+    </div>
+  </li>`;
+}
+
+/** Cheapest way to buy what's on sale: total of the best price per item, and the chain that covers most items. */
+function listTotals(open, infos) {
+  let total = 0;
+  let onSale = 0;
+  const perChain = new Map(); // chainId → {name, n, sum}
+  for (const i of open) {
+    const info = infos.get(i.id);
+    const opts = info.shown && info.shown.linked ? [info.shown] : info.deals;
+    if (!opts.length) continue;
+    onSale++;
+    const m = packs(i);
+    total += Math.min(...opts.map((o) => o.price)) * m;
+    const seen = new Set();
+    for (const o of opts) {
+      if (seen.has(o.chainId)) continue; // deals are sorted best first, so the first per chain is that chain's best
+      seen.add(o.chainId);
+      const c = perChain.get(o.chainId) || { name: o.chain, n: 0, sum: 0 };
+      c.n++;
+      c.sum += Math.min(...opts.filter((x) => x.chainId === o.chainId).map((x) => x.price)) * m;
+      perChain.set(o.chainId, c);
+    }
+  }
+  const best = [...perChain.values()].sort((a, b) => b.n - a.n || a.sum - b.sum)[0] || null;
+  return { total, onSale, best };
+}
+
+/** Usual buys from the receipts (most often first) that aren't on the list already. */
+function usualItems(n = 8) {
+  ensureFit();
+  if (!hasProfile()) return [];
+  const open = new Set(state.list.filter((i) => !i.done).map((i) => normalize(itemName(i))));
+  return [...profile.products]
+    .filter((p) => p.n >= 2 && p.name && !open.has(normalize(p.name)))
+    .sort((a, b) => b.n - a.n || b.w - a.w)
+    .slice(0, n);
 }
 
 function renderList() {
-  const items = [...state.list].sort((a, b) => a.done - b.done);
-  $('#list-items').innerHTML = items
-    .map(
-      (i) => `<li class="item${i.done ? ' done' : ''}${i.id === justAdded ? ' new' : ''}" data-item="${esc(i.id)}">
-      <label class="tick"><input type="checkbox" data-toggle="${esc(i.id)}" ${i.done ? 'checked' : ''} aria-label="Kryss av ${esc(i.text)}"></label>
-      <div class="body"><div class="name">${esc(i.text)}</div>${dealHTML(i)}</div>
-      <button class="del" type="button" data-del="${esc(i.id)}" aria-label="Slett ${esc(i.text)}">×</button>
-    </li>`,
-    )
-    .join('');
-  justAdded = null;
+  const order = new Map(state.categories.map((c, k) => [c.id, k]));
+  const infos = new Map(state.list.map((i) => [i.id, itemInfo(i)]));
   const open = state.list.filter((i) => !i.done);
-  const onSale = open.filter((i) => linkedOffer(i) || dealsFor(i.text, i.eans).length).length;
-  const done = state.list.length - open.length;
+  const done = state.list.filter((i) => i.done);
+  // Grouped by category in the order you walk through a store; inside a group the newest first.
+  const groups = new Map();
+  for (const i of open) {
+    const c = infos.get(i.id).cat;
+    if (!groups.has(c)) groups.set(c, []);
+    groups.get(c).push(i);
+  }
+  const sorted = [...groups.entries()].sort((a, b) => (order.get(a[0]) ?? 99) - (order.get(b[0]) ?? 99));
+  let html = '';
+  for (const [cid, items] of sorted) {
+    const c = catById(cid);
+    html += `<li class="group-h"><span class="dot" style="--c:${esc(c ? c.color : 'var(--text-3)')}"></span>${esc(c ? c.name : 'Annet')}</li>`;
+    html += items.map((i) => itemRow(i, infos.get(i.id))).join('');
+  }
+  if (done.length) {
+    html += `<li class="group-h done-h">Avkrysset · ${done.length}<button id="list-clear" class="btn small btn-ghost" type="button">Fjern avkryssede</button></li>`;
+    html += done.map((i) => itemRow(i, infos.get(i.id))).join('');
+  }
+  $('#list-items').innerHTML = html;
+  justAdded = null;
+
+  const t = listTotals(open, infos);
   $('#list-summary').textContent = state.list.length
-    ? `${open.length} igjen${state.offersData ? ` · ${onSale} på tilbud` : ''}${done ? ` · ${done} avkrysset` : ''}`
+    ? `${open.length} igjen${state.offersData ? ` · ${t.onSale} på tilbud` : ''}${done.length ? ` · ${done.length} avkrysset` : ''}`
     : '';
+  const tot = $('#list-total');
+  tot.hidden = !t.onSale;
+  if (t.onSale) {
+    tot.innerHTML = `<div class="tot-row"><span>Varene på tilbud</span><b>ca. ${krShort(t.total)}</b></div>
+      ${t.best ? `<p class="tot-best">Billigst samlet: <strong>${esc(t.best.name)}</strong> har ${t.best.n} av ${t.onSale} tilbudsvarer${t.best.n === t.onSale ? '' : ''}, ca. ${krShort(t.best.sum)}</p>` : ''}
+      <p class="hint">Regnet med ukens tilbudspriser${open.length > t.onSale ? `. ${open.length - t.onSale} varer er ikke på tilbud og er ikke med` : ''}.</p>`;
+  }
   $('#list-empty').hidden = state.list.length > 0;
-  const clear = $('#list-clear');
-  clear.hidden = !done;
-  clear.textContent = `Fjern avkryssede (${done})`;
+  $('#list-tools').hidden = !open.length;
+  const usual = usualItems();
+  const u = $('#list-usual');
+  u.hidden = !usual.length;
+  if (usual.length) {
+    u.innerHTML = `<h2>Det du pleier å kjøpe</h2><div class="usual-chips">${usual.map((p) => `<button class="chip" type="button" data-usual="${esc(p.name)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>${esc(p.name)}</button>`).join('')}</div>`;
+  }
+}
+
+/** Plain text of the open items, for Web Share or the clipboard. */
+function listAsText() {
+  const open = state.list.filter((i) => !i.done);
+  return 'Handleliste\n' + open.map((i) => `- ${[qtyText(i.qty, i.unit), i.text].filter(Boolean).join(' ')}`).join('\n');
+}
+
+async function shareList() {
+  const text = listAsText();
+  if (navigator.share) {
+    try { await navigator.share({ title: 'Handleliste', text }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Listen er kopiert. Lim den inn i en melding.');
+  } catch (e) {
+    $('#paste-text').value = text;
+    $('#paste-h').textContent = 'Kopier listen';
+    $('#paste-add').hidden = true;
+    $('#dlg-paste').showModal();
+  }
+}
+
+/* ---------- money saved: offers checked off on the list ---------- */
+/** What checking off this item saved: (normal price − offer price) × packs, when the offer says its normal price. */
+function savingFor(i) {
+  const info = itemInfo(i);
+  const o = info.shown;
+  if (!o || !o.prePrice || !(o.prePrice > o.price)) return 0;
+  return Math.round((o.prePrice - o.price) * packs(i) * 100) / 100;
+}
+function recordSaving(i) {
+  state.savings = state.savings.filter((s) => s.id !== i.id);
+  if (i.done) {
+    const amount = savingFor(i);
+    if (amount > 0) state.savings.push({ id: i.id, at: Date.now(), kr: amount, text: i.text });
+  }
+  db.set('savings', state.savings);
+}
+function savedThisMonth() {
+  const key = todayISO().slice(0, 7);
+  return state.savings.filter((s) => { const d = new Date(s.at); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` === key; })
+    .reduce((a, s) => a + s.kr, 0);
 }
 
 /* ---------- home ---------- */
 function homeItemBadge(i) {
-  const o = linkedOffer(i);
-  if (o && !(o.till && o.till < Date.now())) return `<span class="deal-tag">${esc(o.chain)} – ${kr(o.price)}</span>`;
-  const d = dealsFor(i.text, i.eans)[0];
-  return d ? `<span class="deal-tag">${esc(d.chain)} – ${kr(d.price)}</span>` : '';
+  const o = itemInfo(i).shown;
+  return o ? `<span class="deal-tag">${esc(o.chain)} · ${kr(o.price)}</span>` : '';
 }
 
 function miniTrend(months, endKey) {
@@ -546,14 +698,55 @@ function miniTrend(months, endKey) {
   return `<svg class="mini-trend" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">${bars}</svg>`;
 }
 
+/** "Kom i gang": three steps for a new user; gone when done or hidden. */
+function startSteps() {
+  return [
+    { key: 'omrade', label: 'Velg område', sub: 'Så får du tilbudene der du handler', done: !!state.settings.area },
+    { key: 'kjeder', label: 'Velg kjedene dine', sub: 'Skjul butikkene du ikke bruker', done: !!state.settings.chainsSeen },
+    { key: 'kvitteringer', label: 'Legg til kvitteringer', sub: 'Da ser du forbruket og får tilbud for deg', done: state.receipts.length > 0 },
+  ];
+}
+function startCard() {
+  if (state.settings.startDone) return '';
+  const steps = startSteps();
+  if (steps.every((x) => x.done)) return '';
+  const n = steps.filter((x) => x.done).length;
+  return `<section class="card start-card" id="home-start" aria-labelledby="start-h">
+    <div class="start-head"><h2 id="start-h">Kom i gang</h2><span class="start-n">${n} av 3</span></div>
+    <ol class="start-steps">${steps.map((x, k) => `<li class="${x.done ? 'done' : ''}"><button type="button" data-morego="${x.key}">
+      <span class="num" aria-hidden="true">${x.done ? '<svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>' : k + 1}</span>
+      <span class="txt"><b>${x.label}</b><small>${x.done ? 'Ferdig' : x.sub}</small></span><span class="chev" aria-hidden="true"></span></button></li>`).join('')}</ol>
+    <button type="button" class="linkish" data-action="start-hide">Skjul</button></section>`;
+}
+
+/** Budget line for the month: progress, what's left and roughly per day for the rest of the month. */
+function budgetHTML(used) {
+  const b = state.settings.budget;
+  if (!b) return '';
+  const now = new Date();
+  const daysIn = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const daysLeft = daysIn - now.getDate() + 1; // today counts
+  const left = b - used;
+  const pct = Math.min(100, Math.max(0, (used / b) * 100));
+  const over = left < 0;
+  return `<div class="budget${over ? ' over' : pct > 85 ? ' near' : ''}">
+    <div class="row"><span>Brukt ${krShort(used)} av ${krShort(b)}</span><span>${Math.round(pct)} %</span></div>
+    <div class="track" role="progressbar" aria-label="Budsjett brukt" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(pct)}"><div class="fill" style="width:${pct.toFixed(1)}%"></div></div>
+    <p class="budget-left">${over ? `<b>${krShort(-left)} over budsjettet</b>` : `<b>${krShort(left)} igjen</b> · ca. ${krShort(left / daysLeft)} per dag i ${daysLeft} ${daysLeft === 1 ? 'dag' : 'dager'}`}</p></div>`;
+}
+
 function renderHome() {
   const body = $('#home-body');
   const parts = [];
+  const sc = startCard();
+  if (sc) parts.push(sc);
+  const saved = savedThisMonth();
+  const savedHTML = saved > 0 ? `<p class="saved">Spart på tilbud i ${esc(monthFmt.format(new Date()).split(' ')[0])}: <b>${krShort(saved)}</b></p>` : '';
   // Spending overview → Forbruk
   if (!state.receipts.length) {
     parts.push(`<a class="card home-card" href="#forbruk" data-gototab="forbruk" id="home-spend">
       <h2>Forbruk</h2>
-      <p class="home-empty">Ingen kvitteringer ennå. Importer Trumf-innsyn eller legg inn en kvittering, så ser du hva du bruker på mat her.</p>
+      <p class="home-empty">Ingen kvitteringer ennå. Hent inn kvitteringene dine eller legg inn en selv, så ser du hva du bruker på mat her.</p>
       <span class="home-more">Gå til Forbruk</span></a>`);
   } else {
     const c = monthCompare(state.receipts, todayISO());
@@ -572,10 +765,12 @@ function renderHome() {
     parts.push(`<a class="card home-card" href="#forbruk" data-gototab="forbruk" id="home-spend">
       <div class="home-head"><div><h2>Brukt i ${esc(monthFmt.format(monthDate(c.thisKey)).split(' ')[0])}</h2>
         <p class="hero">${krShort(c.now)}</p><p class="hero-sub">${cmp}</p></div>${miniTrend(sum.months, c.thisKey)}</div>
+      ${budgetHTML(c.now)}${savedHTML}
       ${rows.length ? `<p class="home-label">${focus === c.thisKey ? 'Mest brukt på' : `Mest brukt på i ${esc(monthFmt.format(monthDate(focus)).split(' ')[0])}`}</p>
       <ul class="bars">${rows.map(([id, v]) => { const cat = catById(id); return `<li><div class="row"><span>${esc(cat ? cat.name : 'Ukategorisert')}</span><span>${krShort(v)}</span></div>
         <div class="track"><div class="fill${cat ? '' : ' uncat'}" style="width:${((v / max) * 100).toFixed(1)}%;--c:${esc(cat ? cat.color : '')}"></div></div></li>`; }).join('')}</ul>` : ''}
       <span class="home-more">Se alt forbruk</span></a>`);
+    if (!state.settings.budget) parts.push('<button type="button" class="home-link" data-morego="budsjett">Sett et månedsbudsjett</button>');
   }
   // Shopping list → Handleliste
   const open = state.list.filter((i) => !i.done);
@@ -588,12 +783,14 @@ function renderHome() {
   const feat = featuredOffers(6);
   if (feat.length) {
     parts.push(`<section class="home-feat" aria-labelledby="home-feat-h"><h2 id="home-feat-h">Tilbud for deg</h2>
-      <ul>${feat.map(({ o }) => `<li><a href="#tilbud" data-gototab="tilbud">${o.img ? `<img src="${esc(o.img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '<span class="noimg"></span>'}
-        <span class="ft">${esc(titleCase(o.title))}</span><span class="fp">${kr(o.price)}</span><span class="chain" style="--c:${esc(chainColor(o.chainId, o.color))}">${esc(o.chain)}</span></a></li>`).join('')}</ul></section>`);
+      <ul>${feat.map(({ o, because }) => `<li><a href="#tilbud" data-gototab="tilbud">${o.img ? `<img src="${esc(o.img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '<span class="noimg"></span>'}
+        <span class="ft">${esc(titleCase(o.title))}</span><span class="fp">${kr(o.price)}${discount(o) >= 0.05 ? ` <span class="off">−${Math.round(discount(o) * 100)} %</span>` : ''}</span><span class="chain" style="--c:${esc(chainColor(o.chainId, o.color))}">${esc(o.chain)}</span>
+        <span class="why">Du kjøper ${esc(because.name.toLowerCase())}</span></a></li>`).join('')}</ul>${WHY_FOR_YOU}</section>`);
   }
   body.innerHTML = parts.join('');
 }
 const titleCaseFirst = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const WHY_FOR_YOU = `<details class="why-box"><summary>Hvorfor ser jeg disse?</summary><p>Ukens tilbud sammenlignes med varene på kvitteringene dine, her på telefonen. Et tilbud vises bare når det er samme vare (samme strekkode) eller samme slags vare som du har kjøpt, ikke bare samme merke. Ingenting sendes noe sted.</p></details>`;
 
 /* ---------- spending ---------- */
 function shiftMonth(key, delta) {
@@ -609,7 +806,7 @@ function renderSpending() {
     body.innerHTML = `<div class="empty">
       <h2>Ingen kvitteringer ennå</h2>
       <p>Her ser du hva du bruker på mat per måned og per kategori.</p>
-      <p>Kom i gang: bestill <strong>innsyn hos Trumf</strong> (Kiwi, Meny, Spar, Joker) og importer JSON-fila, importer <code>spending.json</code> fra Mac-skriptet (REMA), eller legg inn en kvittering for hånd.</p>
+      <p>Kom i gang: be om <strong>innsyn hos Trumf</strong> (Kiwi, Meny, Spar, Joker) eller Coop, og hent inn fila du får på e-post. Du kan også legge inn en kvittering selv.</p>
     </div>`;
     return;
   }
@@ -809,7 +1006,7 @@ async function importFile(file) {
   }
   if (res.kind === 'backup') {
     const b = res.data;
-    if (!confirm(`Gjenopprette backup fra ${b.exported ? new Date(b.exported).toLocaleString('nb-NO') : 'ukjent dato'}? Dette erstatter kategorier, regler, kvitteringer og handlelisten på denne enheten.`)) return;
+    if (!confirm(`Hente inn sikkerhetskopien fra ${b.exported ? new Date(b.exported).toLocaleString('nb-NO') : 'ukjent dato'}? Den erstatter kategoriene, reglene, kvitteringene og handlelisten her på telefonen.`)) return;
     if (Array.isArray(b.categories) && b.categories.length) state.categories = b.categories;
     state.rules = Array.isArray(b.rules) ? b.rules : [];
     state.receipts = Array.isArray(b.receipts) ? b.receipts : [];
@@ -817,15 +1014,22 @@ async function importFile(file) {
     if (b.settings) state.settings = mergeSettings(state.settings, b.settings, { fromBackup: true }); // keeps this device's repo + token
     await Promise.all([save.categories(), save.rules(), save.receipts(), save.list(), save.settings()]);
     rebuildClassifier();
-    toast('Backup gjenopprettet');
+    toast('Sikkerhetskopien er hentet inn');
   } else {
     const { receipts, added, updated, duplicates } = mergeReceipts(state.receipts, res.data);
     state.receipts = receipts;
     await save.receipts();
     if (res.data.length) state.month = res.data.map((r) => r.date).sort().pop().slice(0, 7);
-    toast(`${{ trumf: 'Trumf', coop: 'Coop' }[res.kind] || 'spending.json'}: ${added} nye${updated ? `, ${updated} oppdatert` : ''} kvitteringer${duplicates ? ` (${duplicates} dobbelt fra flere kilder slått sammen)` : ''}`);
+    toast(`${{ trumf: 'Trumf', coop: 'Coop' }[res.kind] || 'spending.json'}: ${added} nye${updated ? `, ${updated} oppdatert` : ''} kvitteringer${duplicates ? ` (${duplicates} dobbelt fra flere kilder slått sammen)` : ''}${rejectedText(res.rejected)}`);
   }
   render();
+}
+
+/** One friendly sentence per receipt that was left out of an import (negative, future date, not a number). */
+function rejectedText(rejected) {
+  if (!rejected || !rejected.length) return '';
+  const shown = rejected.slice(0, 5).map((r) => r.message).join(' ');
+  return `. ${rejected.length} hoppet over: ${shown}${rejected.length > 5 ? ` Og ${rejected.length - 5} til.` : ''}`;
 }
 
 /* ---------- sync from the user's own private GitHub repo (written by ingest/ on their Mac) ---------- */
@@ -855,8 +1059,8 @@ async function syncSpending({ quiet = false } = {}) {
     if (!REPO_RE.test(s.repo) || !PATH_RE.test(s.path) || s.path.includes('..')) throw new Error('Ugyldig repo eller filsti');
     const json = await ghFile(s, s.path);
     if (json === null) throw new Error(`Fant ikke ${s.path} i ${s.repo} (eller nøkkelen har ikke tilgang til repoet)`);
-    const { kind, data } = detectImport(json);
-    if (kind === 'backup') throw new Error('Synkfila er en backup, ikke kvitteringer');
+    const { kind, data, rejected } = detectImport(json);
+    if (kind === 'backup') throw new Error('Fila er en sikkerhetskopi, ikke kvitteringer');
     const { receipts, added } = mergeReceipts(state.receipts, data);
     state.receipts = receipts;
     // Optional: offers with barcodes next to spending.json (ingest/rema.py --offers). Missing file = fine.
@@ -875,11 +1079,11 @@ async function syncSpending({ quiet = false } = {}) {
     s.lastError = null;
     await Promise.all([save.receipts(), save.settings()]);
     if (added && data.length) state.month = data.map((r) => r.date).sort().pop().slice(0, 7);
-    if (!quiet || added) toast(added ? `Synk: ${added} nye kvitteringer` : 'Synk: ingen nye kvitteringer');
+    if (!quiet || added || rejected.length) toast((added ? `Fra Mac-en: ${added} nye kvitteringer` : 'Fra Mac-en: ingen nye kvitteringer') + rejectedText(rejected));
   } catch (e) {
     s.lastError = e.message;
     save.settings();
-    if (!quiet) toast('Synk feilet: ' + e.message);
+    if (!quiet) toast('Klarte ikke å hente fra Mac-en: ' + e.message);
   } finally {
     syncing = false;
     render();
@@ -947,69 +1151,164 @@ async function copyFromOriginal() {
   await Promise.all([save.categories(), save.rules(), save.receipts(), save.list(), save.settings()]);
   rebuildClassifier();
   renderGeoCard();
-  toast(`Kopiert fra Matkassa: ${n('receipts')} kvitteringer${state.settings.sync.repo && !state.settings.sync.token ? '. Lim inn GitHub-nøkkelen under Synk for å synke her også' : ''}`);
+  toast(`Kopiert fra Matkassa: ${n('receipts')} kvitteringer${state.settings.sync.repo && !state.settings.sync.token ? '. Lim inn GitHub-nøkkelen under Mer → Avansert for å hente her også' : ''}`);
   render();
 }
 
-/* ---------- Mer ---------- */
+/* ---------- Mer: a grouped settings list with subpages (plain Norwegian; technical things under Avansert) ---------- */
+const MORE_PAGES = {
+  omrade: 'Område', kjeder: 'Kjeder', budsjett: 'Budsjett', kvitteringer: 'Kvitteringer', kategorier: 'Kategorier',
+  konto: 'Konto', personvern: 'Personvern og sletting', avansert: 'Avansert', om: 'Om Matkassa',
+};
+const ICONS = {
+  omrade: '<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
+  kjeder: '<path d="M4 9h16l-1.5-5h-13zM5 9v11h14V9M9 20v-6h6v6"/>',
+  budsjett: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v9M14.5 9.5c-.4-1-1.3-1.5-2.5-1.5-1.4 0-2.5.8-2.5 2s1.1 1.6 2.5 2 2.5.8 2.5 2-1.1 2-2.5 2c-1.2 0-2.2-.6-2.6-1.6"/>',
+  kvitteringer: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6"/>',
+  kategorier: '<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/>',
+  konto: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  personvern: '<path d="M12 3 4.5 6v6c0 4.5 3.2 7.7 7.5 9 4.3-1.3 7.5-4.5 7.5-9V6z"/><path d="m9 12 2 2 4-4"/>',
+  avansert: '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
+  om: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/>',
+  tekst: '<path d="M4 18 9 6l5 12M5.8 14h6.4M15 18l3-7 3 7M15.8 16h4.4"/>',
+  mat: '<path d="M7 3v8a2 2 0 0 0 4 0V3M9 13v8M17 21V3c-2 1-3 4-3 7s1 3 3 3"/>',
+};
+const icon = (k) => `<span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24">${ICONS[k]}</svg></span>`;
+const row = (page, label, value = '') => `<li><button type="button" class="set-row" data-morepage="${page}">${icon(page)}<span class="lbl">${esc(label)}</span><span class="val">${esc(value)}</span><span class="chev" aria-hidden="true"></span></button></li>`;
+const toggleRow = (key, ic, label, sub) => `<li><label class="set-row switch-row">${icon(ic)}<span class="lbl">${esc(label)}${sub ? `<small>${esc(sub)}</small>` : ''}</span>
+  <input type="checkbox" role="switch" data-setting="${key}" ${state.settings[key] ? 'checked' : ''}></label></li>`;
+
+const YOUR_DATA = [
+  ['Hva lagres?', 'Handlelisten, kvitteringene du henter inn, kategoriene dine og innstillingene.'],
+  ['Hvor?', 'Bare her på telefonen, i nettleseren. Du trenger ingen konto.'],
+  ['Hvem ser det?', 'Bare du. Tilbudene hentes uten noe om deg, bare for området du har valgt.'],
+  ['Hvordan sletter jeg?', 'Under Personvern og sletting kan du slette kvitteringene eller alt sammen.'],
+];
+
 function renderMore() {
-  const rules = [...state.rules].sort((a, b) => (b.created || 0) - (a.created || 0));
-  const d = state.offersData;
-  $('#more-body').innerHTML = `${accountCard()}
-    <div class="card"><h2>Synk fra Mac</h2>
-      <p class="hint" style="margin-top:0">Valgfritt. Kvitteringene dine hentes fra ditt eget <strong>private</strong> GitHub-repo, som Mac-skriptet (<code>ingest/sync.sh</code>) oppdaterer. Nøkkelen lagres bare på denne enheten og tas aldri med i backup.</p>
+  const page = MORE_PAGES[state.morePage] ? state.morePage : null;
+  $('#view-title').textContent = $('#bar-title').textContent = page ? MORE_PAGES[page] : 'Mer';
+  const body = $('#more-body');
+  body.innerHTML = page ? `<button type="button" class="back" data-morepage=""><span class="chev back-chev" aria-hidden="true"></span>Mer</button>${MORE_RENDER[page]()}` : moreRoot();
+  renderStatus();
+}
+
+function moreRoot() {
+  const known = state.offersData ? knownChains() : [];
+  const shown = known.filter((c) => !hiddenChains().has(c.id)).length;
+  return `<div class="card your-data" id="your-data"><h2>Dine opplysninger</h2>
+      <dl>${YOUR_DATA.map(([q, a]) => `<dt>${q}</dt><dd>${a}</dd>`).join('')}</dl>
+      <button type="button" class="linkish" data-morepage="personvern">Les mer, ta sikkerhetskopi eller slett</button></div>
+    <ul class="settings">${row('omrade', 'Område', area().name)}${row('kjeder', 'Kjeder', known.length ? `${shown} av ${known.length}` : '')}${row('budsjett', 'Budsjett', state.settings.budget ? `${krShort(state.settings.budget)} i måneden` : 'Ikke satt')}</ul>
+    <ul class="settings">${row('kvitteringer', 'Kvitteringer', String(state.receipts.length))}${row('kategorier', 'Kategorier', String(state.categories.length))}</ul>
+    <ul class="settings">${toggleRow('bigText', 'tekst', 'Større tekst', 'Gjør all tekst i appen større')}${toggleRow('foodOnly', 'mat', 'Kun mat i tilbudene', 'Skjuler blomster, klær, dyremat og husholdning')}</ul>
+    <ul class="settings">${cloud ? row('konto', 'Konto', cloud.user ? 'Logget inn' : 'Valgfritt') : ''}${row('personvern', 'Personvern og sletting')}${row('avansert', 'Avansert (for viderekomne)')}${row('om', 'Om Matkassa', APP_VERSION)}</ul>`;
+}
+
+const MORE_RENDER = {
+  omrade: () => `<div class="card"><p class="hint" style="margin-top:0">Tilbudene hentes fra kundeavisene rundt dette stedet.</p>
+      <div class="add-row"><label class="sr-only" for="area-select">Område</label>
+        <select id="area-select">${AREAS.map((a) => `<option value="${esc(a.name)}" ${a.name === area().name ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}${AREAS.some((a) => a.name === area().name) ? '' : `<option selected>${esc(area().name)}</option>`}</select></div>
+      <div class="actions" style="margin-top:10px"><button class="btn" type="button" data-action="area-here">Bruk min posisjon</button></div>
+      <p class="hint">Posisjonen rundes av til omtrent 1 km og lagres bare her på telefonen.</p></div>`,
+  kjeder: () => {
+    if (!state.settings.chainsSeen) { state.settings.chainsSeen = true; save.settings(); }
+    return `<div class="card"><p class="hint" style="margin-top:0">Slå av kjedene du ikke handler i. De vises da ikke i tilbudene eller i handlelisten.</p>
+      ${state.offersData ? `<div class="chain-toggles">${[...knownChains()].sort((a, b) => a.name.localeCompare(b.name, 'nb')).map((c) => `<label class="toggle"><input type="checkbox" data-chainshow="${esc(c.id)}" ${hiddenChains().has(c.id) ? '' : 'checked'}><span class="dot" style="--c:${esc(chainColor(c.id, c.color))}"></span>${esc(c.name)}</label>`).join('')}</div>` : '<p class="hint">Kjedene vises når tilbudene er hentet.</p>'}</div>`;
+  },
+  budsjett: () => `<div class="card"><form id="budget-form">
+      <label class="field"><span>Hvor mye vil du bruke på mat i måneden?</span>
+        <input id="budget-input" inputmode="numeric" placeholder="f.eks. 4 000" value="${state.settings.budget ? esc(String(state.settings.budget)) : ''}" autocomplete="off"></label>
+      <div class="actions"><button class="btn btn-primary" type="submit">Lagre</button>${state.settings.budget ? '<button class="btn btn-ghost" type="button" data-action="budget-clear">Fjern budsjettet</button>' : ''}</div>
+    </form><p class="hint">På Hjem ser du hvor mye som er igjen denne måneden, og omtrent hvor mye du kan bruke per dag. Det regnes ut fra kvitteringene dine.</p></div>`,
+  kvitteringer: () => `<div class="card"><p class="hero">${state.receipts.length}</p><p class="hero-sub">kvittering${state.receipts.length === 1 ? '' : 'er'} lagret her på telefonen</p>
+      <div class="actions" style="margin-top:12px"><button class="btn btn-primary" type="button" data-action="import">Hent inn fra fil</button><button class="btn" type="button" data-action="manual">Legg inn selv</button></div></div>
+    <div class="card"><h2>Slik får du kvitteringene</h2>
+      <ol class="steps"><li><b>Kiwi, Meny, Spar og Joker:</b> logg inn på trumf.no og be om innsyn i dataene dine. Du får en fil på e-post.</li>
+      <li><b>Coop:</b> logg inn på coop.no, gå til Min side og be om innsyn. Du får en fil på e-post.</li>
+      <li>Trykk <b>Hent inn fra fil</b> over og velg fila. Den samme kvitteringen telles bare én gang.</li></ol></div>`,
+  kategorier: () => {
+    const rules = [...state.rules].sort((a, b) => (b.created || 0) - (a.created || 0));
+    return `<div class="card"><p class="hint" style="margin-top:0">Endre navn eller farge, eller legg til en egen kategori.</p>
+      <div id="cat-list">${state.categories.map((c) => `<div class="cat-row">
+        <input type="color" value="${esc(c.color)}" data-catcolor="${esc(c.id)}" aria-label="Farge for ${esc(c.name)}">
+        <input type="text" value="${esc(c.name)}" data-catname="${esc(c.id)}" aria-label="Navn på kategori" maxlength="40">
+        <button class="del" type="button" data-catdel="${esc(c.id)}" aria-label="Slett kategorien ${esc(c.name)}">×</button></div>`).join('')}</div>
+      <form id="cat-add" class="add-row" style="margin-top:8px"><label class="sr-only" for="cat-new">Ny kategori</label><input id="cat-new" placeholder="Ny kategori, f.eks. Barnemat" maxlength="40"><button class="btn" type="submit">Legg til</button></form></div>
+    <div class="card"><h2>Dine regler <small>· ${rules.length}</small></h2>
+      ${rules.length ? `<ul class="rules">${rules.map((r) => `<li><span>${r.type === 'ean' ? 'Strekkode' : 'Navn med'} «${esc(r.pattern)}» → ${esc(catById(r.categoryId) ? catById(r.categoryId).name : '(slettet kategori)')}</span><button class="btn small btn-ghost" type="button" data-ruledel="${esc(r.id)}" aria-label="Slett regelen for ${esc(r.pattern)}">Slett</button></li>`).join('')}</ul>` : '<p class="hint">Ingen egne regler ennå. En regel lages når du velger kategori for en vare under Forbruk, og gjelder da alle like varer, også i tilbudene.</p>'}</div>`;
+  },
+  konto: () => accountCard(),
+  personvern: () => `<div class="card your-data"><h2>Dine opplysninger</h2><dl>${YOUR_DATA.slice(0, 3).map(([q, a]) => `<dt>${q}</dt><dd>${a}</dd>`).join('')}</dl>
+      <dl class="kv"><dt>Kvitteringer</dt><dd>${state.receipts.length}</dd><dt>Varer i listen</dt><dd>${state.list.length}</dd><dt>Egne regler</dt><dd>${state.rules.length}</dd></dl></div>
+    <div class="card"><h2>Sikkerhetskopi</h2>
+      <p class="hint" style="margin-top:0">${state.persisted ? 'Telefonen har lovet å ta vare på dataene. En sikkerhetskopi er likevel lurt hvis du bytter telefon.' : 'Telefonen kan rydde bort data fra nettsider du ikke har brukt på en stund. Lag en sikkerhetskopi av og til, så mister du ingenting.'}</p>
+      <div class="actions"><button class="btn" type="button" data-action="export">Lag sikkerhetskopi</button><button class="btn" type="button" data-action="import">Hent inn sikkerhetskopi</button></div></div>
+    <div class="card danger-zone"><h2>Slett</h2>
+      <p class="hint" style="margin-top:0">Du får spørsmål før noe slettes. Det kan ikke angres.</p>
+      <div class="actions"><button class="btn btn-danger" type="button" data-action="wipe-spending">Slett alle kvitteringer</button>
+      <button class="btn btn-danger" type="button" data-action="wipe-all">Slett alt på denne telefonen</button></div></div>`,
+  avansert: () => {
+    const d = state.offersData;
+    return `<p class="hint">For deg som henter kvitteringer fra REMA 1000 eller Trumf med et skript på Mac-en. Alt her er valgfritt.</p>
+    <div class="card"><h2>Kvitteringer fra Mac-en (GitHub)</h2>
+      <p class="hint" style="margin-top:0">Kvitteringene hentes fra ditt eget <strong>private</strong> GitHub-repo, som Mac-skriptet (<code>ingest/sync.sh</code>) oppdaterer. Nøkkelen lagres bare her og tas aldri med i sikkerhetskopien.</p>
       <form id="sync-form">
         <label class="field"><span>Ditt private repo</span><input id="sync-repo" value="${esc(state.settings.sync.repo)}" placeholder="brukernavn/matkassa-data" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
         <label class="field"><span>GitHub-nøkkel (kun lesetilgang)</span><input id="sync-token" type="password" placeholder="${state.settings.sync.token ? 'Lagret – lim inn for å bytte' : 'github_pat_…'}" autocomplete="off"></label>
         <div class="actions" style="margin-top:8px">
-          <button class="btn" type="submit">${state.settings.sync.token ? 'Synk nå' : 'Lagre og synk'}</button>
+          <button class="btn" type="submit">${state.settings.sync.token ? 'Hent nå' : 'Lagre og hent'}</button>
           ${state.settings.sync.token ? '<button class="btn btn-ghost" type="button" data-action="sync-forget">Glem nøkkel</button>' : ''}
         </div>
       </form>
       <dl class="kv">
-        <dt>Sist synket</dt><dd>${state.settings.sync.lastSync ? timeFmt.format(state.settings.sync.lastSync) : 'aldri'}</dd>
+        <dt>Sist hentet</dt><dd>${state.settings.sync.lastSync ? timeFmt.format(state.settings.sync.lastSync) : 'aldri'}</dd>
         ${state.settings.sync.lastError ? `<dt>Feil</dt><dd>${esc(state.settings.sync.lastError)}</dd>` : ''}
-      </dl>
-    </div>
-    <div class="card"><h2>Område</h2>
-      <p class="hint" style="margin-top:0">Tilbudene hentes for kundeavisene rundt dette stedet.</p>
-      <div class="add-row"><label class="sr-only" for="area-select">Område</label>
-        <select id="area-select">${AREAS.map((a) => `<option value="${esc(a.name)}" ${a.name === area().name ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}${AREAS.some((a) => a.name === area().name) ? '' : `<option selected>${esc(area().name)}</option>`}</select>
-        <button class="btn" type="button" data-action="area-here">Bruk min posisjon</button></div>
-    </div>
-    <div class="card"><h2>Kjeder</h2>
-      <p class="hint" style="margin-top:0">Skjulte kjeder vises ikke i tilbud, filtre eller handlelisten.</p>
-      ${state.offersData ? `<div class="chain-toggles">${[...knownChains()].sort((a, b) => a.name.localeCompare(b.name, 'nb')).map((c) => `<label class="toggle"><input type="checkbox" data-chainshow="${esc(c.id)}" ${hiddenChains().has(c.id) ? '' : 'checked'}><span class="dot" style="--c:${esc(chainColor(c.id, c.color))}"></span>${esc(c.name)}</label>`).join('')}</div>` : '<p class="hint">Kjedene vises når tilbudene er hentet.</p>'}
-    </div>
-    <div class="card"><h2>Kategorier</h2>
-      <div id="cat-list">${state.categories.map((c) => `<div class="cat-row">
-        <input type="color" value="${esc(c.color)}" data-catcolor="${esc(c.id)}" aria-label="Farge for ${esc(c.name)}">
-        <input type="text" value="${esc(c.name)}" data-catname="${esc(c.id)}" aria-label="Navn på kategori" maxlength="40">
-        <button class="del" type="button" data-catdel="${esc(c.id)}" aria-label="Slett ${esc(c.name)}">×</button></div>`).join('')}</div>
-      <form id="cat-add" class="add-row" style="margin-top:8px"><label class="sr-only" for="cat-new">Ny kategori</label><input id="cat-new" placeholder="Ny kategori, f.eks. Barnemat" maxlength="40"><button class="btn" type="submit">Legg til</button></form>
-    </div>
-    <div class="card"><h2>Regler <small>· ${rules.length}</small></h2>
-      ${rules.length ? `<ul class="rules">${rules.map((r) => `<li><span>${r.type === 'ean' ? 'EAN' : 'Inneholder'} «${esc(r.pattern)}» → ${esc(catById(r.categoryId) ? catById(r.categoryId).name : '(slettet kategori)')}</span><button class="btn small btn-ghost" type="button" data-ruledel="${esc(r.id)}" aria-label="Slett regel">Slett</button></li>`).join('')}</ul>` : '<p class="hint">Ingen egne regler ennå. De lages når du velger kategori for en ukategorisert vare. Egne regler går foran det innebygde nøkkelordkartet, også for tilbud.</p>'}
-    </div>
-    <div class="card"><h2>Data</h2>
-      <div class="actions">
-        <button class="btn" type="button" data-action="export">Eksporter backup</button>
-        <button class="btn" type="button" data-action="import">Importer fil</button>
-      </div>
-      ${state.originalExists ? '<div class="actions"><button class="btn" type="button" data-action="copy-original">Hent data fra Matkassa</button></div><p class="hint" style="margin-top:0">Kopierer kvitteringer, handleliste, kategorier og regler fra den vanlige Matkassa i denne nettleseren. Bare én vei, og ikke GitHub-nøkkelen. På iPhone har hver hjem-skjerm-app egen lagring; bruk da backup-fil i stedet.</p>' : ''}
-      <dl class="kv">
-        <dt>Kvitteringer</dt><dd>${state.receipts.length}</dd>
-        <dt>Varer i listen</dt><dd>${state.list.length}</dd>
+      </dl></div>
+    ${state.originalExists ? '<div class="card"><h2>Fra vanlige Matkassa</h2><div class="actions"><button class="btn" type="button" data-action="copy-original">Hent data fra Matkassa</button></div><p class="hint" style="margin-top:0">Kopierer kvitteringer, handleliste, kategorier og regler fra den vanlige Matkassa i denne nettleseren. Bare én vei, og ikke GitHub-nøkkelen. På iPhone har hver hjem-skjerm-app egen lagring; bruk da en sikkerhetskopi i stedet.</p></div>' : ''}
+    <div class="card"><h2>Data</h2><dl class="kv">
         <dt>Tilbud lagret</dt><dd>${d ? `${d.offers.length} (${timeFmt.format(d.fetchedAt)})` : 'ingen'}</dd>
         <dt>Med strekkode</dt><dd>${(() => { const c = eanCoverage(offerIndex.map((x) => x.o)); return c.n ? `${c.withEan} av ${c.n} (${c.pct.toLocaleString('nb-NO', { maximumFractionDigits: 1 })} %)` : '–'; })()}${state.extraOffers ? ` · REMA Superpris: ${state.extraOffers.offers.length}` : ''}</dd>
-        <dt>Varig lagring</dt><dd>${state.persisted ? 'Ja' : 'Ikke bekreftet – ta backup jevnlig'}</dd>
+        <dt>Varig lagring</dt><dd>${state.persisted ? 'Ja' : 'Ikke bekreftet'}</dd>
       </dl>
-      <div class="actions" style="margin-top:12px"><button class="btn btn-danger btn-ghost" type="button" data-action="wipe-spending">Slett alle kvitteringer</button></div>
-    </div>
-    <div class="card"><h2>Om Matkassa</h2>
-      <p class="hint" style="margin-top:0">Versjon ${APP_VERSION}. Tilbud hentes fra Tjek (motoren bak eTilbudsavis), et uoffisielt API, for området rundt ${esc(area().name)}. Kategorier for tilbud gjettes fra varenavnet. «Tilbud for deg» lærer bare av kvitteringene på denne enheten. Tjek-tilbud har ikke strekkoder, så de matches på navn; strekkodetreff (EAN) vises der begge sider har strekkode. Alt du legger inn lagres bare på denne enheten.</p>
-      <p class="hint">Installer: åpne i Safari → Del → <strong>Legg til på Hjem-skjerm</strong>.</p>
-    </div>`;
+      <p class="hint">Filer som kan hentes inn: Trumf-innsyn (JSON), Coop-innsyn (CSV eller JSON), <code>spending.json</code> fra Mac-skriptet og sikkerhetskopier.</p></div>`;
+  },
+  om: () => `<div class="card"><h2>Matkassa+ ${APP_VERSION}</h2>
+      <ul class="about">
+        <li>Tilbudene hentes fra Tjek (motoren bak eTilbudsavis) for området rundt ${esc(area().name)}. Det er ikke en offisiell tjeneste.</li>
+        <li>Kategorien til et tilbud gjettes fra navnet. Du kan rette den med en egen regel.</li>
+        <li>«Tilbud for deg» lærer bare av kvitteringene her på telefonen.</li>
+        <li>Alt du legger inn, lagres bare her på telefonen.</li>
+      </ul>
+      <h3 class="sub">Legg appen på hjem-skjermen</h3>
+      <p class="hint" style="margin-top:4px">iPhone: åpne siden i Safari, trykk Del-knappen og velg <strong>Legg til på Hjem-skjerm</strong>. Android: trykk menyen i Chrome og velg <strong>Installer app</strong>.</p></div>`,
+};
+
+/** A confirm sheet for anything that deletes data: says exactly what goes, the red button names the action. */
+function askConfirm({ title, text, ok }) {
+  const dlg = $('#dlg-confirm');
+  $('#confirm-h').textContent = title;
+  $('#confirm-text').textContent = text;
+  $('#confirm-ok').textContent = ok;
+  dlg.returnValue = '';
+  dlg.showModal();
+  return new Promise((r) => dlg.addEventListener('close', () => r(dlg.returnValue === 'ok'), { once: true }));
+}
+
+async function wipeAll() {
+  state.list = [];
+  state.receipts = [];
+  state.rules = [];
+  state.savings = [];
+  state.categories = DEFAULT_CATEGORIES.map((c) => ({ ...c }));
+  state.extraOffers = null;
+  state.settings = { ...defaultSettings(), geo: 'done' }; // also forgets the area and the GitHub key
+  await Promise.all([save.list(), save.receipts(), save.rules(), save.categories(), save.settings(), db.set('savings', []), db.del('extraOffers')]);
+  applyTextSize();
+  rebuildClassifier();
+  state.morePage = null;
+  render();
+  toast('Alt er slettet fra denne telefonen');
 }
 
 /* ---------- account + cloud sync (optional, Supabase) ---------- */
@@ -1040,7 +1339,7 @@ function askMerge(local, remote) {
 
 async function cloudSync({ quiet = false } = {}) {
   if (!cloud || !cloud.user || cloudState.busy) return;
-  if (!navigator.onLine) { cloudState.error = 'Frakoblet – synker når nettet er tilbake'; if (state.tab === 'mer') renderMore(); return; }
+  if (!navigator.onLine) { cloudState.error = 'Frakoblet – oppdateres når nettet er tilbake'; if (state.tab === 'mer') renderMore(); return; }
   cloudState.busy = true;
   if (state.tab === 'mer') renderMore();
   try {
@@ -1056,7 +1355,7 @@ async function cloudSync({ quiet = false } = {}) {
       const remote = { receipts: live('receipts'), list: live('list_items') };
       if ((local.receipts || local.list || state.rules.length) && (remote.receipts || remote.list || live('rules'))) {
         const choice = await askMerge(local, remote);
-        if (choice === 'cancel') { cloudState.error = 'Synk avbrutt – ingenting er endret'; return; }
+        if (choice === 'cancel') { cloudState.error = 'Avbrutt – ingenting er endret'; return; }
         replace = choice === 'account';
       }
     }
@@ -1093,7 +1392,7 @@ async function cloudSync({ quiet = false } = {}) {
     await db.set('cloudMeta', meta);
     cloudState.lastSync = Date.now();
     cloudState.error = null;
-    if (!quiet) toast('Synket med kontoen');
+    if (!quiet) toast('Kontoen er oppdatert');
     cloud.connections().then((c) => { cloudState.connections = c; if (state.tab === 'mer') renderMore(); }).catch(() => {});
   } catch (e) {
     cloudState.error = e.message;
@@ -1109,7 +1408,7 @@ function accountCard() {
   if (!cloud) return '';
   if (!cloud.user) {
     return `<div class="card" id="account-card"><h2>Konto</h2>
-      <p class="hint" style="margin-top:0">Valgfritt. Med konto synkes kvitteringer, handleliste, kategorier og regler mellom enhetene dine. Uten konto virker alt som før, bare på denne enheten.</p>
+      <p class="hint" style="margin-top:0">Valgfritt. Med en konto får du kvitteringer, handleliste, kategorier og regler på alle enhetene dine. Uten konto virker alt som før, bare på denne enheten.</p>
       <form id="login-form">
         <label class="field"><span>E-post</span><input id="login-email" type="email" autocomplete="username" autocapitalize="off" spellcheck="false" required></label>
         <label class="field"><span>Passord</span><input id="login-password" type="password" autocomplete="current-password"></label>
@@ -1126,11 +1425,11 @@ function accountCard() {
   return `<div class="card" id="account-card"><h2>Konto</h2>
     <dl class="kv">
       <dt>Logget inn som</dt><dd>${esc(cloud.user.email)}</dd>
-      <dt>Sist synket</dt><dd>${cloudState.busy ? 'Synker …' : cloudState.lastSync ? timeFmt.format(cloudState.lastSync) : 'ikke ennå'}</dd>
+      <dt>Sist oppdatert</dt><dd>${cloudState.busy ? 'Oppdaterer …' : cloudState.lastSync ? timeFmt.format(cloudState.lastSync) : 'ikke ennå'}</dd>
       ${cloudState.error ? `<dt>Feil</dt><dd>${esc(cloudState.error)}</dd>` : ''}
     </dl>
     <div class="actions" style="margin-top:8px">
-      <button class="btn" type="button" data-action="cloud-sync"${cloudState.busy ? ' aria-busy="true"' : ''}>Synk nå</button>
+      <button class="btn" type="button" data-action="cloud-sync"${cloudState.busy ? ' aria-busy="true"' : ''}>Oppdater nå</button>
       <button class="btn btn-ghost" type="button" data-action="logout">Logg ut</button>
     </div>
     <h3 class="sub">Kvitteringer fra kjedene</h3>
@@ -1146,7 +1445,7 @@ function accountCard() {
 const CONNECT_HELP = {
   trumf: 'Trumf kan ikke kobles til inne i appen: innloggingen (telefon, passord og SMS-kode) skjer bare på trumf.no, og Trumf har ingen innlogging for andre apper. Gjør det i stedet én gang på Mac-en: kjør «node ingest/trumf-login.mjs», logg inn hos Trumf i vinduet som åpnes, og lukk det. Deretter hentes kvitteringene hver søndag.',
   rema: 'REMA kan ikke kobles til inne i appen: Æ-innloggingen er beskyttet med reCAPTCHA og sender deg bare tilbake til REMAs egen app, og det skal vi ikke omgå. Gjør det i stedet én gang på Mac-en: kjør «rema1000 login» og logg inn selv. Deretter hentes kvitteringene hver søndag.',
-  coop: 'Coop har ingen åpen eller dokumentert måte å hente egne kvitteringer på. Bestill innsyn i stedet: coop.no → Min side → Bestill innsyn. Når du får fila (JSON eller CSV), importer den under Forbruk → Importer fil.',
+  coop: 'Coop har ingen åpen eller dokumentert måte å hente egne kvitteringer på. Bestill innsyn i stedet: coop.no → Min side → Bestill innsyn. Når du får fila, hent den inn under Mer → Kvitteringer.',
 };
 
 async function accountAction(act, btn) {
@@ -1274,13 +1573,28 @@ let resortTimer;
 function bind() {
   for (const d of document.querySelectorAll('dialog.sheet')) enableSheetDrag(d);
   watchLargeTitle($('#large-title'), $('#topbar'));
+  $('#toast').addEventListener('click', (e) => {
+    if (!e.target.closest('.toast-act') || !toastAction) return;
+    const run = toastAction.run;
+    toastAction = null;
+    hideToast();
+    run();
+  });
   document.querySelector('.tabbar').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-tab]');
     if (b) showTab(b.dataset.tab);
   });
   $('#refresh').addEventListener('click', () => loadOffers(true));
-  window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (TABS.includes(h) && h !== state.tab) showTab(h); });
+  window.addEventListener('hashchange', () => {
+    const [h, pg] = location.hash.slice(1).split('/');
+    if (TABS.includes(h) && h !== state.tab) showTab(h);
+    if (h === 'mer' && MORE_PAGES[pg]) { state.morePage = pg; renderMore(); }
+  });
   $('#view-hjem').addEventListener('click', (e) => {
+    const go = e.target.closest('[data-morego]');
+    if (go) { showTab('mer'); state.morePage = go.dataset.morego; renderMore(); return; }
+    if (e.target.closest('[data-action="start-hide"]')) { state.settings.startDone = true; save.settings(); renderHome(); return; }
+    if (e.target.closest('.why-box')) return;
     const a = e.target.closest('[data-gototab]');
     if (!a) return;
     e.preventDefault();
@@ -1313,6 +1627,14 @@ function bind() {
       renderOffers();
       return;
     }
+    if (e.target.closest('[data-foodonly]')) {
+      state.settings.foodOnly = !foodOnly();
+      if (state.settings.foodOnly && NON_FOOD.has(state.cat)) state.cat = null;
+      save.settings();
+      state.shown = PAGE;
+      renderOffers();
+      return;
+    }
     const cat = e.target.closest('[data-cat]');
     if (cat) { state.cat = cat.dataset.cat || null; state.shown = PAGE; renderOffers(); return; }
     const add = e.target.closest('[data-add]');
@@ -1324,12 +1646,14 @@ function bind() {
         save.list();
         toast('Fjernet fra handlelisten');
       } else {
-        addItem(titleCase(o.title), { id: o.id, chain: o.chain, chainId: o.chainId, price: o.price, till: o.till, title: o.title, eans: o.eans });
+        addItem(titleCase(o.title), { id: o.id, chain: o.chain, chainId: o.chainId, price: o.price, prePrice: o.prePrice || null, till: o.till, title: o.title, eans: o.eans });
         toast(`Lagt til: ${titleCase(o.title)}`);
       }
       syncAddButtons(o);
       renderBadge();
     }
+    const go = e.target.closest('[data-morego]');
+    if (go) { showTab('mer'); state.morePage = go.dataset.morego; renderMore(); return; }
     if (e.target.closest('[data-action="refresh"]')) loadOffers(true);
     if (e.target.closest('[data-gototab]')) showTab(e.target.closest('[data-gototab]').dataset.gototab);
   });
@@ -1343,32 +1667,86 @@ function bind() {
     renderBadge();
     input.focus();
   });
+  /** Check an item off (or back on). The row moves to Avkrysset after a short beat, so a quick second tap still lands. */
+  const setDone = (it, done) => {
+    it.done = done;
+    it.doneAt = done ? Date.now() : null;
+    save.list();
+    recordSaving(it);
+    haptic(done ? 12 : 6);
+    const row = document.querySelector(`[data-item="${CSS.escape(it.id)}"]`);
+    if (row) { row.classList.toggle('done', done); const cb = row.querySelector('[data-toggle]'); if (cb) cb.checked = done; }
+    renderBadge();
+    clearTimeout(resortTimer);
+    resortTimer = setTimeout(() => { if (state.tab === 'liste') flip($('#list-items'), renderList); }, 650);
+  };
+  const removeItem = async (id, row) => {
+    const idx = state.list.findIndex((i) => i.id === id);
+    if (idx < 0) return;
+    const [gone] = state.list.splice(idx, 1);
+    save.list();
+    renderBadge();
+    if (row) await exitRow(row);
+    renderList();
+    toast(`Slettet: ${gone.text}`, { label: 'Angre', run: () => { state.list.splice(Math.min(idx, state.list.length), 0, gone); save.list(); renderList(); renderBadge(); } });
+  };
   $('#list-items').addEventListener('change', (e) => {
     const id = e.target.dataset.toggle;
     if (!id) return;
     const it = state.list.find((i) => i.id === id);
-    if (!it) return;
-    it.done = e.target.checked;
-    save.list();
-    e.target.closest('.item').classList.toggle('done', it.done);
-    renderBadge();
-    clearTimeout(resortTimer);
-    resortTimer = setTimeout(() => { if (state.tab === 'liste') flip($('#list-items'), renderList); }, 650);
+    if (it) setDone(it, e.target.checked);
   });
   $('#list-items').addEventListener('click', async (e) => {
     const del = e.target.closest('[data-del]');
-    if (!del) return;
-    state.list = state.list.filter((i) => i.id !== del.dataset.del);
-    save.list();
-    renderBadge();
-    await exitRow(del.closest('.item'));
-    renderList();
+    if (del) { await removeItem(del.dataset.del, del.closest('.item')); return; }
+    const step = e.target.closest('[data-inc], [data-dec]');
+    if (step) {
+      const it = state.list.find((i) => i.id === (step.dataset.inc || step.dataset.dec));
+      if (!it) return;
+      if (it.qty == null) { const p = parseQty(it.text); it.text = p.name; it.qty = p.qty ?? 1; it.unit = p.unit || 'stk'; }
+      const st = qtyStep(it.unit);
+      it.qty = Math.max(st, Math.round((it.qty + (step.dataset.inc ? st : -st)) * 100) / 100);
+      save.list();
+      haptic(4);
+      renderList();
+      const again = document.querySelector(`[data-${step.dataset.inc ? 'inc' : 'dec'}="${CSS.escape(it.id)}"]`);
+      if (again && !again.disabled) again.focus({ preventScroll: true });
+      return;
+    }
+    if (e.target.closest('#list-clear')) {
+      const gone = state.list.filter((i) => i.done);
+      state.list = state.list.filter((i) => !i.done);
+      save.list();
+      renderList();
+      renderBadge();
+      toast(`Fjernet ${gone.length} avkryssede`, { label: 'Angre', run: () => { state.list = state.list.concat(gone); save.list(); renderList(); renderBadge(); } });
+    }
   });
-  $('#list-clear').addEventListener('click', () => {
-    state.list = state.list.filter((i) => !i.done);
-    save.list();
+  enableSwipe($('#list-items'), {
+    onDone: (id) => { const it = state.list.find((i) => i.id === id); if (it) setDone(it, !it.done); },
+    onDelete: (id, row) => removeItem(id, row),
+    haptic,
+  });
+  $('#view-liste').addEventListener('click', (e) => {
+    const u = e.target.closest('[data-usual]');
+    if (u) { addItem(u.dataset.usual); renderList(); renderBadge(); haptic(6); return; }
+    if (e.target.closest('[data-action="share-list"]')) shareList();
+    if (e.target.closest('[data-action="paste-list"]')) {
+      $('#paste-text').value = '';
+      $('#paste-h').textContent = 'Lim inn en liste';
+      $('#paste-add').hidden = false;
+      $('#dlg-paste').showModal();
+    }
+  });
+  $('#paste-form').addEventListener('submit', (e) => {
+    if (e.submitter && e.submitter.value !== 'add') return;
+    e.preventDefault();
+    const lines = pastedLines($('#paste-text').value);
+    for (const l of lines.reverse()) addItem(l);
+    $('#dlg-paste').close();
     renderList();
     renderBadge();
+    if (lines.length) toast(`La til ${lines.length} vare${lines.length === 1 ? '' : 'r'}`);
   });
 
   document.addEventListener('click', (e) => {
@@ -1387,11 +1765,15 @@ function bind() {
       renderMore();
     }
     if (['signup', 'magic', 'logout', 'cloud-sync', 'cloud-wipe'].includes(act) && cloud) accountAction(act, a);
-    if (act === 'wipe-spending' && confirm('Slette alle kvitteringer på denne enheten? Kategorier og regler beholdes. Ta gjerne backup først.')) {
-      state.receipts = [];
-      save.receipts();
-      render();
+    if (act === 'wipe-spending') {
+      askConfirm({ title: 'Slette alle kvitteringer?', text: `${state.receipts.length} kvitteringer slettes fra denne telefonen. Handlelisten, kategoriene og reglene beholdes. Det kan ikke angres.`, ok: 'Slett kvitteringene' })
+        .then((yes) => { if (!yes) return; state.receipts = []; save.receipts(); render(); toast('Kvitteringene er slettet'); });
     }
+    if (act === 'wipe-all') {
+      askConfirm({ title: 'Slette alt?', text: 'Handlelisten, alle kvitteringer, egne kategorier og regler, budsjettet og innstillingene slettes fra denne telefonen. Det kan ikke angres. Lag gjerne en sikkerhetskopi først.', ok: 'Slett alt' })
+        .then((yes) => { if (yes) wipeAll(); });
+    }
+    if (act === 'budget-clear') { state.settings.budget = null; save.settings(); toast('Budsjettet er fjernet'); renderMore(); }
   });
   $('#file-input').addEventListener('change', async (e) => {
     const f = e.target.files[0];
@@ -1443,8 +1825,24 @@ function bind() {
     d.addEventListener('click', (e) => { if (e.target === d) d.close(); });
   }
 
+  $('#view-mer').addEventListener('click', (e) => {
+    const pg = e.target.closest('[data-morepage]');
+    if (!pg) return;
+    state.morePage = pg.dataset.morepage || null;
+    renderMore();
+    window.scrollTo(0, 0);
+    const focus = state.morePage ? $('#more-body .back') : $(`#more-body [data-morepage="${pg.dataset.morepage}"]`);
+    if (focus && e.detail === 0) focus.focus(); // keyboard: keep the place
+  });
   $('#view-mer').addEventListener('change', (e) => {
     const t = e.target;
+    if (t.dataset.setting) {
+      state.settings[t.dataset.setting] = t.checked;
+      save.settings();
+      if (t.dataset.setting === 'bigText') applyTextSize();
+      haptic(6);
+      return;
+    }
     if (t.id === 'area-select') {
       const a = AREAS.find((x) => x.name === t.value);
       if (a) setArea(a);
@@ -1516,9 +1914,21 @@ function bind() {
       const token = $('#sync-token').value.trim();
       if (token) s.token = token;
       await save.settings();
-      if (!s.repo) { toast('Synk er slått av'); renderMore(); return; }
+      if (!s.repo) { toast('Henting fra Mac-en er slått av'); renderMore(); return; }
       if (!s.token) { toast('Lim inn en GitHub-nøkkel først'); renderMore(); return; }
       syncSpending();
+      return;
+    }
+    if (e.target.id === 'budget-form') {
+      e.preventDefault();
+      const raw = $('#budget-input').value.trim();
+      const b = validBudget(raw);
+      if (raw && !b) { toast('Skriv et beløp i kroner, f.eks. 4000'); return; }
+      state.settings.budget = b;
+      save.settings();
+      toast(b ? `Budsjett: ${krShort(b)} i måneden` : 'Budsjettet er fjernet');
+      state.morePage = null;
+      renderMore();
       return;
     }
     if (e.target.id !== 'cat-add') return;
@@ -1534,7 +1944,7 @@ function bind() {
   window.addEventListener('offline', () => { state.error = 'Frakoblet'; renderStatus(); });
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { if (!$('#toast').hidden) clearTimeout(toastTimer); return; }
-    if (!$('#toast').hidden) { clearTimeout(toastTimer); toastTimer = setTimeout(hideToast, TOAST_MS); }
+    if (!$('#toast').hidden) { clearTimeout(toastTimer); toastTimer = setTimeout(hideToast, toastMs($('#toast').textContent)); }
     loadOffers();
     if (syncDue()) syncSpending({ quiet: true });
     if (cloud && cloud.user && Date.now() - (cloudState.lastSync || 0) > 5 * 60 * 1000) cloudSync({ quiet: true });
@@ -1545,16 +1955,23 @@ function bind() {
 async function start() {
   bind();
   try {
-    const [offers, list, categories, rules, receipts, settings, extraOffers] = await Promise.all(
-      ['offers', 'list', 'categories', 'rules', 'receipts', 'settings', 'extraOffers'].map((k) => db.get(k)),
+    const [offers, list, categories, rules, receipts, settings, extraOffers, savings, catVersion] = await Promise.all(
+      ['offers', 'list', 'categories', 'rules', 'receipts', 'settings', 'extraOffers', 'savings', 'catVersion'].map((k) => db.get(k)),
     );
+    if (Array.isArray(savings)) state.savings = savings.filter((x) => x && Number.isFinite(x.kr));
     if (offers) state.offersData = offers;
     if (extraOffers && Array.isArray(extraOffers.offers)) state.extraOffers = extraOffers;
     if (list) state.list = list;
-    if (categories && categories.length) state.categories = categories;
+    if (categories && categories.length) {
+      // once: Kjøtt/fisk → Kjøtt, plus Fisk, Pålegg, Ferdigmat, Dyremat, Ikke-mat (user edits kept)
+      state.categories = (catVersion || 1) < CATEGORY_VERSION ? migrateCategories(categories) : categories;
+      if ((catVersion || 1) < CATEGORY_VERSION) save.categories();
+    }
+    if ((catVersion || 1) < CATEGORY_VERSION) db.set('catVersion', CATEGORY_VERSION);
     if (rules) state.rules = rules;
     if (receipts) state.receipts = receipts;
     if (settings) state.settings = mergeSettings(state.settings, settings);
+    applyTextSize();
   } catch (e) {
     console.error('Lagring utilgjengelig', e);
     state.error = 'Lagring er ikke tilgjengelig i denne nettleseren';
@@ -1565,11 +1982,13 @@ async function start() {
     await cloud.init().catch(() => null);
     if (/access_token=|error_description=/.test(tabHash)) { // back from a magic link
       try { await cloud.fromRedirect(tabHash); toast(`Logget inn som ${cloud.user.email}`); } catch (e) { cloudState.error = e.message; toast(e.message); }
-      tabHash = 'mer';
+      tabHash = 'mer/konto';
       try { history.replaceState(null, '', location.pathname + '#mer'); } catch (e) { /* file:// */ }
     }
   }
-  showTab(TABS.includes(tabHash) ? tabHash : 'hjem');
+  const [hashTab, hashPage] = tabHash.split('/'); // "#mer/konto" opens a Mer subpage
+  showTab(TABS.includes(hashTab) ? hashTab : 'hjem');
+  if (hashTab === 'mer' && MORE_PAGES[hashPage]) { state.morePage = hashPage; renderMore(); }
   db.persist().then((p) => (state.persisted = p));
   originalExists().then((v) => { state.originalExists = v; if (v && state.tab === 'mer') renderMore(); });
   loadOffers();

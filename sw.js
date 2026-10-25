@@ -3,7 +3,7 @@
 // Cache names are per app: the original Matkassa lives on the same GitHub Pages origin ('matkassa-v*',
 // 'matkassa-img'), so this worker uses its own prefix and only ever deletes its own caches.
 const PREFIX = 'matkassa-premium-v';
-const VERSION = PREFIX + '2';
+const VERSION = PREFIX + '3';
 const SHELL = [
   './',
   'index.html',

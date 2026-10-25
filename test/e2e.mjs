@@ -118,6 +118,17 @@ const chrome = spawn(CHROME, [
   '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check',
   '--hide-scrollbars', '--disable-extensions', '--window-size=390,844', 'about:blank',
 ], { stdio: ['ignore', 'ignore', 'pipe'] });
+// Always remove the temp profile and stop Chrome, also when the run crashes or is interrupted (a full disk once
+// came from leftover profiles). --keep-open skips this on purpose.
+let cleaned = false;
+const cleanupSync = () => {
+  if (cleaned || KEEP) return;
+  cleaned = true;
+  try { chrome.kill('SIGKILL'); } catch {}
+  try { fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {}
+};
+process.on('exit', cleanupSync);
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanupSync(); process.exit(130); });
 const wsUrl = await new Promise((resolve, reject) => {
   let buf = '';
   const t = setTimeout(() => reject(new Error('Chrome did not start (set CHROME=…)')), 20000);
@@ -223,6 +234,8 @@ const shot = async (name) => {
   fs.writeFileSync(path.join(SHOTS, `${name}.png`), Buffer.from(data, 'base64'));
 };
 const tab = (t) => evaluate(`document.querySelector('.tabbar button[data-tab="${t}"]').click(); await new Promise(r => setTimeout(r, 250)); return true;`);
+/** Mer is a settings list now: open one of its subpages (Område, Kjeder, Konto, Avansert …). */
+const merPage = async (p) => { await tab('mer'); return evaluate(`document.querySelector('[data-morepage="${p}"]').click(); await new Promise(r => setTimeout(r, 120)); return true;`); };
 const click = (sel) => evaluate(`const el = document.querySelector(${JSON.stringify(sel)}); if (!el) throw new Error('missing ' + ${JSON.stringify(sel)}); el.click(); await new Promise(r => setTimeout(r, 250)); return true;`);
 const toastText = () => evaluate(`const t = document.querySelector('#toast'); return t && !t.hidden ? t.textContent : '';`);
 async function importFixture(file) {
@@ -243,7 +256,7 @@ async function a11yAudit(where) {
       if (!vis(b)) continue;
       if (!name(b)) out.unnamedButtons.push(b.outerHTML.slice(0, 80));
       const r = b.getBoundingClientRect();
-      if ((r.width < 44 || r.height < 44) && !b.classList.contains('chip') && b.tagName !== 'rect') out.smallTargets.push((name(b) || b.className).slice(0, 30) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height));
+      if ((r.width < 44 || r.height < 44) && !b.classList.contains('chip') && !b.classList.contains('sr-only') && b.tagName !== 'rect') out.smallTargets.push((name(b) || b.className).slice(0, 30) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height));
     }
     for (const i of document.querySelectorAll('input:not([type=hidden]):not([type=file]), select, textarea')) {
       if (!vis(i)) continue;
@@ -322,7 +335,7 @@ async function locationTests() {
     check(tjekAreas.slice(n0).includes('60.39,5.32'), 'location allowed: Tjek asked for offers around the position', tjekAreas.slice(n0).join(' | '));
     check(!(await geoCardShown()), 'location allowed: no first-run card');
     await waitFor(`!document.querySelector('#refresh').classList.contains('spinning')`, 15000);
-    await tab('mer');
+    await merPage('omrade');
     check(await evaluate(`return document.querySelector('#area-select').selectedOptions[0].textContent === 'Min posisjon';`), 'location allowed: Mer → Område shows "Min posisjon"');
     await navigate(BASE + 'index.html#tilbud');
     await waitFor(`document.querySelectorAll('#offer-list li').length > 0`, 15000);
@@ -347,7 +360,7 @@ async function locationTests() {
     await waitFor(`document.querySelectorAll('#offer-list li').length > 0`, 15000);
     await sleep(500);
     check(await evaluate(`return window.__geoCalls === 0 && !document.querySelector('#toast').textContent.includes('posisjon');`), 'location denied: no prompt or toast on the next start');
-    await tab('mer');
+    await merPage('omrade');
     await evaluate(`const s = document.querySelector('#area-select'); s.value = 'Oslo'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
     const picked = await waitFor(`/Område: Oslo/.test(document.querySelector('#toast').textContent)`, 5000);
     await sleep(1500);
@@ -421,7 +434,7 @@ async function isolationTests() {
     const names = await dbNames();
     check(names.includes(`${ORIG_DB}@1`) && names.includes(`${APP_DB}@1`), 'isolation: two separate IndexedDB databases, the original still at version 1', names.join(', '));
     check((await readSettings()) === null || !(await readSettings()).sync.token, 'isolation: premium does not pick up the original\'s settings by itself');
-    await tab('mer');
+    await merPage('avansert');
     check(await waitFor(`!!document.querySelector('[data-action="copy-original"]')`, 5000), 'copy: "Hent data fra Matkassa" offered when the original has data');
     await click('[data-action="copy-original"]');
     await sleep(500);
@@ -439,7 +452,7 @@ async function isolationTests() {
   await inFreshContext('no original', async () => {
     await navigate(BASE + 'index.html#tilbud');
     await waitFor(`document.querySelectorAll('#offer-list li').length > 0`, 20000);
-    await tab('mer');
+    await merPage('avansert');
     await sleep(800);
     const names = await dbNames();
     check(!names.some((n) => n.startsWith(`${ORIG_DB}@`)), "isolation: premium never creates the original's database", names.join(', '));
@@ -539,11 +552,11 @@ async function cloudTests() {
       await navigate(BASE + 'index.html#liste');
       await waitFor(`document.querySelector('#list-form')`);
       await evaluate(`document.querySelector('#list-input').value = 'melk lokal'; document.querySelector('#list-form').requestSubmit(); return true;`);
-      await tab('mer');
+      await merPage('avansert');
       // a (fake) GitHub key on this device must never reach Supabase
       await evaluate(`document.querySelector('#sync-repo').value = '${FAKE_REPO}'; document.querySelector('#sync-token').value = '${FAKE_TOKEN}'; document.querySelector('#sync-form').requestSubmit(); return true;`);
-      await waitFor(`/Synk: \\d+ nye/.test(document.querySelector('#toast').textContent)`);
-      await tab('mer');
+      await waitFor(`/Fra Mac-en: \\d+ nye/.test(document.querySelector('#toast').textContent)`);
+      await merPage('konto');
       check(await evaluate(`return !!document.querySelector('#account-card #login-form') && /Logg inn/.test(document.querySelector('#account-card').textContent);`), 'cloud: "Logg inn" shown when a Supabase config is present');
       await a11yAudit('mer-konto');
       await evaluate(`document.querySelector('#login-email').value = '${A_EMAIL}'; document.querySelector('#login-password').value = 'feil-FAKE'; document.querySelector('#login-form').requestSubmit(); return true;`);
@@ -554,7 +567,7 @@ async function cloudTests() {
       check(/kvitteringer/.test(mergeText) && /Kontoen har 1 kvittering og 1 vare\./.test(mergeText), 'cloud: merge dialog shows the counts on both sides', mergeText);
       await shot('10-konto-sla-sammen');
       await evaluate(`document.querySelector('#dlg-merge button[value="merge"]').click(); return true;`);
-      check(await waitFor(`/Synket med kontoen/.test(document.querySelector('#toast').textContent)`, 10000), 'cloud: merge + sync finishes');
+      check(await waitFor(`/Kontoen er oppdatert/.test(document.querySelector('#toast').textContent)`, 10000), 'cloud: merge + sync finishes');
       await tab('liste');
       const texts = await listTexts();
       check(texts.includes('melk lokal') && texts.includes('kaffe fra kontoen'), 'cloud: merge keeps local and account items', texts.join(', '));
@@ -571,14 +584,14 @@ async function cloudTests() {
       // another device changes and deletes items → "Synk nå" brings it here
       supa.remoteWrite('list_items', A.id, 'konto-1', { id: 'konto-1', text: 'kaffe (endret på mobilen)', done: false, added: 1 });
       supa.remoteWrite('list_items', A.id, 'konto-2', { id: 'konto-2', text: 'egg fra mobilen', done: false, added: 2 });
-      await tab('mer');
+      await merPage('konto');
       await click('[data-action="cloud-sync"]');
-      await waitFor(`/Synket/.test(document.querySelector('#toast').textContent)`, 8000);
+      await waitFor(`/Kontoen er oppdatert/.test(document.querySelector('#toast').textContent)`, 8000);
       await tab('liste');
       let t2 = await listTexts();
       check(t2.includes('kaffe (endret på mobilen)') && t2.includes('egg fra mobilen'), 'cloud: changes from another device arrive', t2.join(', '));
       supa.remoteWrite('list_items', A.id, 'konto-2', {}, true);
-      await tab('mer');
+      await merPage('konto');
       await click('[data-action="cloud-sync"]');
       await sleep(1200);
       await tab('liste');
@@ -589,7 +602,7 @@ async function cloudTests() {
       const tomb = await (async () => { const end = Date.now() + 9000; while (Date.now() < end) { if (supa.tables.list_items.find((x) => x.id === 'konto-1').deleted) return true; await sleep(300); } return false; })();
       check(tomb, 'cloud: deleting here marks it deleted in the account');
       // chain connections: status only, "Koble fra" deletes it, "Koble til" explains honestly
-      await tab('mer');
+      await merPage('konto');
       await waitFor(`document.querySelector('[data-conn="trumf"]') && /Tilkoblet/.test(document.querySelector('[data-conn="trumf"]').textContent)`, 5000);
       check(await evaluate(`return /Tilkoblet/.test(document.querySelector('[data-conn="trumf"]').textContent) && !!document.querySelector('[data-disconnect="trumf"]') && !!document.querySelector('[data-connect="rema"]');`), 'connect: Mer shows Trumf connected, REMA not');
       check(!supa.log.some((r) => /chain_connections\?select=[^&]*secret/.test(r.path)), 'connect: the app never asks for the secret');
@@ -613,10 +626,10 @@ async function cloudTests() {
     });
     // second device: fresh browser, same account → no question (nothing local), everything arrives
     await inFreshContext('cloud device 2', async () => {
-      await navigate(BASE + 'index.html#mer');
+      await navigate(BASE + 'index.html#mer/konto');
       await waitFor(`document.querySelector('#login-form')`);
       await evaluate(`document.querySelector('#login-email').value = '${A_EMAIL}'; document.querySelector('#login-password').value = '${A_PW}'; document.querySelector('#login-form').requestSubmit(); return true;`);
-      check(await waitFor(`/Synket med kontoen/.test(document.querySelector('#toast').textContent)`, 10000), 'cloud device 2: login syncs without a merge question');
+      check(await waitFor(`/Kontoen er oppdatert/.test(document.querySelector('#toast').textContent)`, 10000), 'cloud device 2: login syncs without a merge question');
       await tab('liste');
       const t = await listTexts();
       check(t.includes('melk lokal') && !t.some((x) => /kaffe/.test(x)), 'cloud device 2: gets the list as it is now (incl. deletes)', t.join(', '));
@@ -666,7 +679,7 @@ try {
 
   await tab('forbruk');
   check(await evaluate(`return /Ingen kvitteringer/.test(document.querySelector('#spend-body').textContent);`), 'forbruk: empty state');
-  await tab('mer');
+  await merPage('avansert');
   check(await evaluate(`return document.querySelector('#sync-repo').value === '';`), 'mer: sync repo is empty by default (no personal default)');
   check(await evaluate(`return !document.querySelector('#account-card') && !/Logg inn/.test(document.querySelector('#view-mer').textContent);`), 'mer: no "Logg inn" without a Supabase config (works fully without an account)');
   await a11yAudit('mer');
@@ -680,11 +693,11 @@ try {
   check(/Coop: 2 nye/.test(await importFixture(path.join(FAKE, 'coop-innsyn-FAKE.csv'))), 'import: Coop innsyn CSV (fake, guessed format)');
 
   // 3. Sync from a (fake) private repo with a (fake) token
-  await tab('mer');
+  await merPage('avansert');
   await evaluate(`document.querySelector('#sync-repo').value = 'not a repo'; document.querySelector('#sync-token').value = '${FAKE_TOKEN}'; document.querySelector('#sync-form').requestSubmit(); await new Promise(r => setTimeout(r, 300)); return true;`);
   check(/brukernavn\/repo/.test(await toastText()), 'sync: invalid repo name rejected');
   await evaluate(`document.querySelector('#sync-repo').value = 'https://github.com/${FAKE_REPO}.git'; document.querySelector('#sync-token').value = '${FAKE_TOKEN}'; document.querySelector('#sync-form').requestSubmit(); return true;`);
-  check(await waitFor(`/Synk: 12 nye/.test(document.querySelector('#toast').textContent)`), 'sync: 12 fake receipts fetched from the fake repo (URL form accepted)');
+  check(await waitFor(`/Fra Mac-en: 12 nye/.test(document.querySelector('#toast').textContent)`), 'sync: 12 fake receipts fetched from the fake repo (URL form accepted)');
   check(ghRequests.some((r) => r.path.endsWith('/rema-offers.json')), 'sync: also fetches rema-offers.json (barcode offers)');
   check(ghRequests.every((r) => r.auth === `Bearer ${FAKE_TOKEN}`), 'sync: only the fake token was ever sent');
   await sleep(300);
@@ -693,6 +706,7 @@ try {
   await shot('03-mer-synk');
 
   // 4. Backup never contains the token
+  await merPage('personvern');
   const backup = await evaluate(`
     let blob; const orig = URL.createObjectURL; URL.createObjectURL = (b) => { blob = b; return orig(b); };
     const canShare = navigator.canShare; navigator.canShare = undefined; // force the download path so the blob can be read
@@ -748,12 +762,12 @@ try {
   check(await evaluate(`return !document.querySelector('#view-tilbud').hidden;`), 'hjem: tapping an offer opens Tilbud');
 
   // 6. Hide a chain
-  await tab('mer');
+  await merPage('kjeder');
   await evaluate(`const cb = document.querySelector('[data-chainshow="257bxm"]'); cb.click(); return true;`);
   await tab('tilbud');
   const chips = await evaluate(`return [...document.querySelectorAll('#chain-chips .chip')].map(c => c.textContent.trim());`);
   fixtureCheck(!chips.includes('KIWI') && !(await evaluate(`return /KIWI/.test(document.querySelector('#offer-list').textContent);`)), 'hidden chain gone from chips and offers', chips.join(','));
-  await tab('mer');
+  await merPage('kjeder');
   await evaluate(`document.querySelector('[data-chainshow="257bxm"]').click(); return true;`);
 
   // 7. Shopping list: name match + barcode remembered from an offer
@@ -770,12 +784,12 @@ try {
   const linkedName = item && item.offer ? item.offer.chain : '';
   if (!linkedChain) fixtureCheck(false, 'list: offer-linked item stops showing a hidden chain', 'no offer-linked item');
   else {
-    await tab('mer');
+    await merPage('kjeder');
     await evaluate(`document.querySelector('[data-chainshow="${linkedChain}"]').click(); return true;`);
     await tab('liste');
     const linkedText = await evaluate(`return [...document.querySelectorAll('#list-items .item')].find(li => li.textContent.includes(${JSON.stringify((item && item.text) || '')}))?.textContent || '';`);
     check(linkedChain && linkedText && !linkedText.includes(`hos ${linkedName}`), 'list: offer-linked item stops showing a hidden chain', linkedText.replace(/\s+/g, ' ').trim().slice(0, 80));
-    await tab('mer');
+    await merPage('kjeder');
     await evaluate(`document.querySelector('[data-chainshow="${linkedChain}"]').click(); return true;`);
   }
 
@@ -784,8 +798,8 @@ try {
   await tab('tilbud');
   const emptyText = await evaluate(`return document.querySelector('#offer-empty').hidden ? '' : document.querySelector('#offer-empty').textContent;`);
   check(/Alle kjeder er skjult/.test(emptyText) && /Mer → Kjeder/.test(emptyText), 'all chains hidden: empty state says so and points to Mer → Kjeder');
-  await click('#offer-empty [data-gototab="mer"]');
-  check(await evaluate(`return !document.querySelector('#view-mer').hidden;`), 'all chains hidden: button opens Mer');
+  await click('#offer-empty [data-morego="kjeder"]');
+  check(await evaluate(`return !document.querySelector('#view-mer').hidden && !!document.querySelector('[data-chainshow]');`), 'all chains hidden: button opens Mer → Kjeder');
   await evaluate(`for (const cb of document.querySelectorAll('[data-chainshow]')) if (!cb.checked) cb.click(); return true;`);
   await tab('liste');
   check(await noHScroll(), 'liste: no horizontal scroll');
@@ -823,6 +837,98 @@ try {
   await evaluate(`document.querySelector('.tabbar button[data-tab="hjem"]').click(); return true;`);
   check(await evaluate(`return getComputedStyle(document.querySelector('#home-body > *')).animationName === 'home-fade';`), 'reduced motion: Hjem arrives with a fade only, no movement');
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }, S);
+
+  // R4. Customer round 1 changes (Matkassa+ 0.6.1)
+  await tab('tilbud');
+  await evaluate(`const i = document.querySelector('#offer-search'); i.value = 'melk'; i.dispatchEvent(new Event('input', { bubbles: true })); return true;`);
+  await sleep(300);
+  const melkHits = await evaluate(`return [...document.querySelectorAll('#offer-list .offer .title')].map((t) => t.textContent);`);
+  fixtureCheck(melkHits.some((t) => /helmelk/i.test(t)) && !melkHits.some((t) => /sjokomelk/i.test(t)), 'r4 search: "melk" finds helmelk, not sjokomelk', melkHits.join(' | '));
+  await evaluate(`const i = document.querySelector('#offer-search'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); return true;`);
+  await sleep(300);
+  const food = await evaluate(`return { pressed: document.querySelector('[data-foodonly]')?.getAttribute('aria-pressed'), text: document.querySelector('#offer-list').textContent };`);
+  fixtureCheck(food.pressed === 'true' && !/DREAMIES|ROSEBUKETT/i.test(food.text), 'r4 Kun mat: on by default, hides pet food and flowers', food.pressed);
+  await click('[data-foodonly]');
+  await sleep(200);
+  fixtureCheck(/ROSEBUKETT/i.test(await evaluate(`return document.querySelector('#offer-list').textContent;`)), 'r4 Kun mat: off shows non-food again');
+  await click('[data-foodonly]');
+  check(await evaluate(`const t = document.querySelector('.toolbar'); return getComputedStyle(t).position === 'sticky';`), 'r4 design: search toolbar is sticky');
+
+  await tab('liste');
+  await evaluate(`document.querySelector('#list-input').value = '2 l melk'; document.querySelector('#list-form').requestSubmit(); return true;`);
+  await sleep(250);
+  const q = await evaluate(`const li = [...document.querySelectorAll('#list-items .item')].find((x) => x.querySelector('.name').textContent === 'melk' && x.querySelector('.qv').textContent); return { name: li.querySelector('.name').textContent, qty: li.querySelector('.qv').textContent, deal: li.textContent };`);
+  check(q.name === 'melk' && q.qty === '2 l', 'r4 list: "2 l melk" → name "melk" and amount "2 l"', JSON.stringify(q));
+  fixtureCheck(/På tilbud hos/.test(q.deal) && !/sjokomelk/i.test(q.deal), 'r4 list: the amount does not break matching (milk, not sjokomelk)', q.deal.replace(/\s+/g, ' ').slice(0, 120));
+  const melkId = await evaluate(`return [...document.querySelectorAll('#list-items .item')].find((x) => x.querySelector('.qv').textContent === '2 l').dataset.item;`);
+  await evaluate(`document.querySelector('[data-inc="${melkId}"]').click(); return true;`);
+  check(await evaluate(`return document.querySelector('[data-item="${melkId}"] .qv').textContent;`) === '2,5 l', 'r4 list: + adds half a litre');
+  const rowH = await evaluate(`return Math.round([...document.querySelectorAll('#list-items .item')].find((li) => /Ikke på tilbud/.test(li.textContent) || li.querySelector('.deal'))?.getBoundingClientRect().height || 0);`);
+  check(rowH >= 44 && rowH <= 60, 'r4 list: compact rows (~52 px)', `${rowH}px`);
+  check(await evaluate(`return document.querySelectorAll('#list-items .group-h').length >= 2;`), 'r4 list: grouped by category');
+  fixtureCheck(await evaluate(`return !document.querySelector('#list-total').hidden && /ca\\./.test(document.querySelector('#list-total').textContent) && /Billigst samlet/.test(document.querySelector('#list-total').textContent);`), 'r4 list: total and cheapest store');
+  fixtureCheck(await evaluate(`return document.querySelectorAll('#list-usual [data-usual]').length > 0;`), 'r4 list: "Det du pleier å kjøpe" chips from the receipts');
+  // swipe right = check off, swipe left = delete (+ Angre)
+  const touchSwipe = async (y, x0, x1) => {
+    await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x0, y }] }, S);
+    for (let i = 1; i <= 8; i++) { await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x0 + ((x1 - x0) * i) / 8, y }] }, S); await sleep(16); }
+    await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }, S);
+  };
+  const rowAt = async (n) => evaluate(`const li = [...document.querySelectorAll('#list-items .item:not(.done)')][${n}]; li.scrollIntoView({ block: 'center' }); await new Promise(r => setTimeout(r, 100)); const r = li.querySelector('.name').getBoundingClientRect(); return { id: li.dataset.item, y: r.y + r.height / 2, x: r.x + 10 };`);
+  let sw = await rowAt(0);
+  await touchSwipe(sw.y, sw.x, sw.x + 200);
+  await sleep(300);
+  check(await evaluate(`return document.querySelector('[data-item="${sw.id}"]').classList.contains('done');`), 'r4 swipe: right checks the item off');
+  await sleep(900);
+  sw = await rowAt(0);
+  const before = await evaluate(`return document.querySelectorAll('#list-items .item').length;`);
+  await touchSwipe(sw.y, sw.x + 120, sw.x - 10); // start left of the amount stepper
+  await sleep(600);
+  check(!(await evaluate(`return !!document.querySelector('[data-item="${sw.id}"]');`)) && /Slettet/.test(await toastText()), 'r4 swipe: left deletes, with an Angre toast');
+  await click('#toast .toast-act');
+  await sleep(200);
+  check(await evaluate(`return document.querySelectorAll('#list-items .item').length;`) === before, 'r4 swipe: Angre brings it back');
+  // share (no Web Share in headless → clipboard or the copy sheet), paste a list
+  await evaluate(`navigator.share = undefined; navigator.clipboard.writeText = async (t) => { window.__shared = t; }; return true;`);
+  await click('[data-action="share-list"]');
+  await sleep(200);
+  check(/^Handleliste\n- 2,5 l melk/m.test(await evaluate(`return window.__shared || '';`)) || /- 2,5 l melk/.test(await evaluate(`return window.__shared || '';`)), 'r4 share: the list as plain text with amounts', await evaluate(`return (window.__shared || '').slice(0, 60);`));
+  await click('[data-action="paste-list"]');
+  await evaluate(`document.querySelector('#paste-text').value = 'Handleliste:\\n- 500 g kjøttdeig\\n• løk\\n3. tomater (FAKE)'; document.querySelector('#paste-add').click(); return true;`);
+  await sleep(300);
+  const pasted = await listTexts();
+  check(['kjøttdeig', 'løk', 'tomater (FAKE)'].every((t) => pasted.includes(t)), 'r4 paste: one item per line, bullets and numbers removed', pasted.slice(0, 6).join(', '));
+
+  // Hjem: budget and "Kom i gang"
+  await merPage('budsjett');
+  await evaluate(`document.querySelector('#budget-input').value = '4 000'; document.querySelector('#budget-form').requestSubmit(); return true;`);
+  await sleep(200);
+  check(/4\s000 kr i måneden/.test(await evaluate(`return document.querySelector('#more-body').textContent;`)), 'r4 budget: saved and shown in Mer');
+  await tab('hjem');
+  check(await evaluate(`const b = document.querySelector('#home-spend .budget'); return !!b && /av 4\\s000 kr/.test(b.textContent) && /(igjen|over budsjettet)/.test(b.textContent);`), 'r4 budget: progress and kr left on Hjem');
+  check(await evaluate(`return !!document.querySelector('#home-start') && document.querySelectorAll('#home-start .start-steps li').length === 3;`), 'r4 kom i gang: three-step card on Hjem');
+  await click('[data-action="start-hide"]');
+  check(!(await evaluate(`return !!document.querySelector('#home-start');`)), 'r4 kom i gang: "Skjul" removes it');
+
+  // Mer: grouped list, plain words, your data, bigger text, danger zone with confirmation
+  await tab('mer');
+  const root = await evaluate(`return document.querySelector('#more-body').textContent;`);
+  check(/Dine opplysninger/.test(root) && !/backup|synk|\bEAN\b|JSON|GitHub/i.test(root), 'r4 mer: plain Norwegian on the main list (no backup/synk/EAN/JSON/GitHub)', root.match(/backup|synk|\bEAN\b|JSON|GitHub/i)?.[0] || '');
+  check(await evaluate(`return document.querySelectorAll('#more-body .set-row').length >= 8;`), 'r4 mer: grouped rows with subpages');
+  await evaluate(`document.querySelector('[data-setting="bigText"]').click(); return true;`);
+  const bigText = await evaluate(`return { on: document.documentElement.classList.contains('big-text'), fs: parseFloat(getComputedStyle(document.documentElement).fontSize) };`);
+  check(bigText.on && bigText.fs > 18, 'r4 mer: "Større tekst" makes all text bigger', JSON.stringify(bigText));
+  check(await noHScroll(), 'r4 mer: no horizontal scroll with bigger text');
+  await evaluate(`document.querySelector('[data-setting="bigText"]').click(); return true;`);
+  await merPage('personvern');
+  await click('[data-action="wipe-spending"]');
+  await sleep(300);
+  check(await evaluate(`return document.querySelector('#dlg-confirm').open && /kvitteringer slettes/.test(document.querySelector('#confirm-text').textContent);`), 'r4 mer: deleting asks first and says what goes');
+  await evaluate(`document.querySelector('#dlg-confirm button[value="cancel"]').click(); return true;`);
+  await sleep(300);
+  await tab('forbruk');
+  check(!/Ingen kvitteringer/.test(await evaluate(`return document.querySelector('#spend-body').textContent;`)), 'r4 mer: Avbryt keeps the receipts');
+  await a11yAudit('r4-liste-mer');
 
   // 10. Huge data: 3 000 receipts × 15 lines
   const big = path.join(OUT, 'huge-FAKE.json');
@@ -891,7 +997,7 @@ try {
     chrome.kill();
     server.close();
     await sleep(300);
-    fs.rmSync(profile, { recursive: true, force: true });
+    cleanupSync();
   }
   process.exit(fail ? 1 : 0);
 }
