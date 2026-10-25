@@ -85,12 +85,16 @@ export function buildProfile(receipts, opts = {}) {
  * head ("lettmelk" ~ "melk"); 0.5 = both end in the same known word ("lettmelk" ~ "helmelk"). A front that makes it
  * another product never counts ("sjokomelk" is not milk), and neither does a shared start ("melkesjokolade").
  */
+// Tails that say how a product is cut or packed, not what it is: "kyllingfilet" and "torskefilet" are not the same.
+export const GENERIC_TAILS = new Set(['filet', 'fileter', 'filét', 'bryst', 'lår', 'skiver', 'skive', 'biter', 'bit', 'stykker', 'terninger', 'strimler',
+  'kjøtt', 'deig', 'mix', 'miks', 'saus', 'pålegg', 'salat', 'suppe', 'pai', 'gryte', 'boller', 'kaker', 'kake', 'stang', 'staver', 'pinner', 'pakke', 'pose', 'boks']);
 function wordHit(w, t) {
   if (w === t) return 1;
-  if (wordMatch(t, w) === 2 || wordMatch(w, t) === 2) return 0.6;
+  const head = (a, b) => wordMatch(a, b) === 2 && !GENERIC_TAILS.has(a);
+  if (head(t, w) || head(w, t)) return 0.6;
   for (let n = Math.min(w.length, t.length) - 1; n >= 4; n--) {
     const tail = w.slice(-n);
-    if (t.endsWith(tail) && keywordCategory(tail) && wordMatch(tail, w) === 2 && wordMatch(tail, t) === 2) return 0.5;
+    if (t.endsWith(tail) && !GENERIC_TAILS.has(tail) && keywordCategory(tail) && wordMatch(tail, w) === 2 && wordMatch(tail, t) === 2) return 0.5;
   }
   return 0;
 }

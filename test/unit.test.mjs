@@ -1,7 +1,7 @@
 // Run: node test/unit.test.mjs   (no dependencies). All data here is FAKE test data.
 import fs from 'node:fs';
-import { detectImport, detectImportText, summarize, toNumber, mergeReceipts, monthCompare, parseCSV, dedupeReceipts, validateReceipts, notFinite } from '../js/spending.js';
-import { makeClassifier, DEFAULT_CATEGORIES, tokens, matchOffer, parseQty, qtyStep, qtyText, migrateCategories, compatible, wordMatch, NON_FOOD } from '../js/categories.js';
+import { detectImport, detectImportText, summarize, toNumber, mergeReceipts, monthCompare, parseCSV, dedupeReceipts, validateReceipts, notFinite, cleanBackup, friendlyError } from '../js/spending.js';
+import { makeClassifier, DEFAULT_CATEGORIES, tokens, matchOffer, parseQty, qtyStep, qtyText, migrateCategories, compatible, wordMatch, NON_FOOD, keywordCategory } from '../js/categories.js';
 import { buildProfile, scoreOffer, normEan, productKey } from '../js/profile.js';
 import { parseExtraOffers, mergeExtraOffers, eanCoverage } from '../js/extra-offers.js';
 import { normalizeOffer, AREAS, DEFAULT_AREA } from '../js/tjek.js';
@@ -372,5 +372,64 @@ ok(rb(100) < 100 && rb(400) - rb(300) < rb(100) - rb(0), 'sheet: dragging up rub
   ok(mm.receipts.length === 2 && mm.added === 1 && mm.receipts.every(Boolean), 'merge: null/undefined entries in the existing list (and the new one) are ignored');
   ok(mergeReceipts(undefined, [R('2026-10-02', 6)]).receipts.length === 1, 'merge: no existing list at all');
 }
+
+/* ---------- Maria 4b: backups with broken entries, sane receipt ranges, friendly errors ---------- */
+{
+  const NOW = new Date(2026, 9, 25, 12).getTime();
+  const b = cleanBackup({
+    categories: [null, 7, 'x', { id: 'meieri', name: 'Meieri', color: '#123456' }, { name: 'uten id' }, { id: 'meieri', name: 'dobbel' }],
+    rules: [null, { pattern: null, categoryId: 'meieri' }, { type: 'ean', pattern: 7038010009457, categoryId: 'meieri' }, 'regel'],
+    list: [null, 'bare tekst', { text: 'melk' }, { id: 'a', text: '' }, { id: 'b', text: 'brød', done: 1 }],
+    receipts: [null, 5, { id: 'ok', date: '2026-10-01', total: 120, lines: [null, { name: 'MELK', amount: 20 }] }, { id: 'old', date: '1900-01-01', total: 10 },
+      { id: 'huge', date: '2026-10-01', total: 99999999999 }, { id: 'abc', date: '2026-10-01', total: 'abc' }, { id: 'nodate', total: 5 }, { id: 'inf', date: '2026-10-01', total: Infinity }],
+  }, { now: NOW });
+  ok(b.categories.length === 1 && b.categories[0].id === 'meieri' && b.categories[0].color === '#123456', 'backup: categories without an id, duplicates and nulls are dropped', JSON.stringify(b.categories));
+  ok(b.rules.length === 1 && b.rules[0].type === 'ean' && b.rules[0].pattern === '7038010009457', 'backup: rules need a pattern and a category');
+  ok(b.list.length === 2 && b.list.every((i) => i.id && i.text) && b.list[1].done === true, 'backup: list items need a text; ids filled in', JSON.stringify(b.list));
+  ok(b.receipts.length === 1 && b.receipts[0].id === 'ok' && b.receipts[0].lines.length === 1, 'backup: only the sane receipt is kept, null lines removed');
+  ok(['gammel', 'stor', 'tall', 'dato', 'tall'].every((r, i) => b.rejected[i] && b.rejected[i].reason === r), 'backup: 1900, 99 999 999 999 kr, "abc", no date and Infinity are rejected with reasons', b.rejected.map((r) => r.reason).join());
+  ok(b.rejected.every((r) => /hoppet over\.$/.test(r.message)), 'backup: a friendly message per rejected receipt');
+  ok(b.dropped > 0 && cleanBackup(null).categories === null && cleanBackup({ categories: 'x', rules: {}, list: 5 }).list.length === 0, 'backup: non-arrays and a missing backup are safe');
+  const edge = validateReceipts([{ id: 'a', date: '2000-01-01', total: 99999.99 }, { id: 'b', date: '1999-12-31', total: 5 }, { id: 'c', date: '2026-10-01', total: 100000 }], NOW);
+  ok(edge.receipts.length === 1 && edge.receipts[0].id === 'a', 'receipts: sane range is year 2000 or later and under 100 000 kr');
+  const sp = detectImport({ schema: 'matkassa.spending/1', receipts: [{ id: 'x', date: '2026-10-01', total: 'abc', lines: [] }, { id: 'y', date: '2026-10-01', total: '12,50', lines: [] }] }, { now: NOW });
+  ok(sp.data.length === 1 && sp.data[0].id === 'y' && sp.rejected[0].reason === 'tall', 'import: total "abc" is rejected, not read as 0 kr');
+  ok(notFinite('abc') && !notFinite('') && !notFinite('-') && !notFinite('12,50') && !notFinite(null), 'notFinite: text that is not a number is bad, blank or "-" is missing');
+
+  // the classifier never throws on bad entries
+  let threw = false;
+  try { const c = makeClassifier([null, { id: 'meieri' }, 7], [null, { pattern: null }, { type: 'text', pattern: 'lettmelk', categoryId: 'meieri' }, 'x']); ok(c('TINE LETTMELK') === 'meieri', 'classifier: works with null categories and rules'); } catch (e) { threw = e; }
+  ok(!threw, 'classifier: null entries do not throw', String(threw));
+  try { makeClassifier(null, null)('melk'); makeClassifier(undefined, 'x')('melk'); } catch (e) { threw = e; }
+  ok(!threw, 'classifier: missing lists do not throw');
+
+  ok(friendlyError(new TypeError("Cannot read properties of null (reading 'id')")) === 'Noe gikk galt. Prøv igjen.', 'errors: a raw JS error becomes a friendly sentence');
+  ok(/Fikk ikke kontakt/.test(friendlyError(new TypeError('Failed to fetch'))), 'errors: a network error says so in Norwegian');
+  ok(friendlyError(new Error('Fila er ikke gyldig JSON eller CSV')) === 'Fila er ikke gyldig JSON eller CSV', 'errors: our own Norwegian messages are kept');
+  ok(friendlyError(new SyntaxError('Unexpected token < in JSON at position 0')) === 'Noe gikk galt. Prøv igjen.' && friendlyError(null) === 'Noe gikk galt. Prøv igjen.', 'errors: JSON errors and nothing at all');
+}
+
+/* ---------- Maria 4b (Premium): fish fillets, generic tails, non-food, category order ---------- */
+{
+  for (const n of ['Torskefilet', 'Seifilet', 'Sildefilet', 'Ørretfilet', 'Hyse filet', 'LOFOTEN TORSKEFILET NATURELL 400G', 'Laksefilet']) ok(cls(n) === 'fisk', `fish fillet: ${n} → Fisk`, cls(n));
+  for (const n of ['Kyllingfilet', 'Svinefilet', 'Indrefilet av storfe', 'PRIOR KYLLINGFILET 700G']) ok(cls(n) === 'kjott', `meat fillet: ${n} → Kjøtt`, cls(n));
+  const hit = (q, title) => matchOffer(tokens(q), keywordCategory(q), tokens(title), cls(title), { prefix: true });
+  ok(hit('torsk', 'Torskefilet') > 0 && hit('torsk', 'LOFOTEN TORSKEFILET NATURELL 400G') > 0, 'search: "torsk" finds Torskefilet');
+  ok(!hit('torsk', 'Kyllingfilet') && !hit('kyllingfilet', 'Torskefilet'), 'search: a shared "filet" is not a match');
+  const fishBuyer = buildProfile([R2('2026-10-01', 'LOFOTEN TORSKEFILET'), R2('2026-10-08', 'LOFOTEN TORSKEFILET')], cls);
+  const sc = (t) => scoreOffer(fishBuyer, tokens(t), { cat: cls(t) }).score;
+  ok(sc('Kyllingfilet') === 0 && sc('PRIOR KYLLINGFILET 700G') === 0, 'for deg: buying torskefilet does not suggest kyllingfilet (generic tail "filet")');
+  ok(sc('Torskefilet naturell') > 0, 'for deg: buying torskefilet still suggests torskefilet');
+  for (const n of ['Barnesko str 24-30', 'Grillkull 2,5 kg', 'Tennbriketter', 'Bjørkeved 40 l', 'NORTHPEAK ULLERN VINTERSKO']) ok(NON_FOOD.has(cls(n)), `Kun mat hides: ${n}`, cls(n));
+  for (const n of ['Vilje kullsyredrikk', 'SOLBOLLER/SKOLEBRØD', 'Skogsbær']) ok(!NON_FOOD.has(cls(n)), `Kun mat keeps: ${n}`, cls(n));
+  const OLD = ['meieri', 'kjott', 'frukt', 'brod', 'torr', 'snacks', 'drikke', 'frossen', 'hus', 'annet'].map((id) => ({ id, name: id, color: '#000' }));
+  ok(migrateCategories(OLD).map((c) => c.id).join() === DEFAULT_CATEGORIES.map((c) => c.id).join(), 'migrate: an untouched old order becomes the new store order');
+  const custom = [...OLD]; custom.splice(3, 0, { id: 'baby', name: 'Baby', color: '#000' });
+  const mc = migrateCategories(custom).map((c) => c.id);
+  ok(mc.indexOf('baby') === mc.indexOf('frukt') + 1 && mc[0] === 'frukt', 'migrate: a category the user made stays after the one it followed', mc.join());
+  const moved = [OLD[2], OLD[0], OLD[1], ...OLD.slice(3)];
+  ok(migrateCategories(moved).slice(0, 2).map((c) => c.id).join() === 'frukt,meieri', 'migrate: a list the user reordered keeps its order');
+}
+function R2(date, name) { return { id: date + name, date, total: 50, store: 'FAKE', lines: [{ name, amount: 50 }] }; }
 
 console.log(failed ? `\n${failed} FAILED` : '\nAll unit tests passed');

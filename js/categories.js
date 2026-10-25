@@ -55,8 +55,23 @@ export function migrateCategories(stored) {
     out.splice(at, 0, { ...d });
     ids.add(d.id);
   }
-  return out;
+  // Never reordered (the defaults still come in the first version's order): use the new store order.
+  const was = stored.filter((c) => c && OLD_ORDER.includes(c.id)).map((c) => c.id);
+  if (was.join() !== OLD_ORDER.filter((id) => was.includes(id)).join()) return out;
+  const isDef = (c) => DEFAULT_CATEGORIES.some((d) => d.id === c.id);
+  const sorted = DEFAULT_CATEGORIES.map((d) => out.find((c) => c.id === d.id)).filter(Boolean);
+  // a category the user made stays right after the default it followed
+  out.forEach((c, i) => {
+    if (isDef(c)) return;
+    const prev = out.slice(0, i).reverse().find(isDef);
+    const at = prev ? sorted.findIndex((x) => x.id === prev.id) + 1 : 0;
+    let k = at;
+    while (k < sorted.length && !isDef(sorted[k])) k++; // after earlier custom ones in the same spot
+    sorted.splice(k, 0, c);
+  });
+  return sorted;
 }
+const OLD_ORDER = ['meieri', 'kjott', 'frukt', 'brod', 'torr', 'snacks', 'drikke', 'frossen', 'hus', 'annet'];
 
 /*
  * Keyword map, in tiers. A product is classified by the first tier that has a hit, so what a product IS beats what
@@ -80,7 +95,8 @@ const TIERS = [
       vanter hansker *jakke =jakke *bukse =bukse *dress =dress vintersko =sko tøfler pyjamas parkas fleece* håndkle*
       =pute dyne sengetøy kjøkkenredskap* stekepanne* kaffetrakter* stavmikser* airfryer* støvsuger*
       robotstøvsuger =robot gavepapir =tape =briller =bøker bøøker =bok tegneserie tubalighter =lighter
-      =batteri =battery`,
+      =batteri =battery *sko barnesko joggesko sandaler *sandaler *støvler =støvler =støvel *genser =genser *skjorte =truse *truser =klær
+      grillkull =kull trekull *briketter tennbriketter tennvæske opptenning* grilltenner =ved bjørkeved peisved vedkubber fyrstikker`,
     hus: `toalettpapir tørkepapir tørkeruller =lambi =torky serla vaskemiddel oppvaskmiddel oppvask* =zalo =jif
       klorin =omo biotex softlan tøymykner *såpe =såpe sjampo shampoo sunsilk hårbalsam =balsam dusj* =dusch dusch*
       dobbeldusch deodorant =deo roll-on tannkrem tannpasta tannbørste colgate zendium sensodyne bleier =libero =libresse =tena
@@ -132,13 +148,13 @@ const TIERS = [
       fløte matfløte kremfløte rømme lettrømme =ost brunost geitost gulost hvitost lettost =egg *egg egg frokostegg
       norvegia jarlsberg gudbrandsdalsost fløtemysost =smør meierismør bremykt kulturmelk mozzarella parmesan
       cheddar brie feta crème creme fraîche camembert gorgonzola cambozola maasdam mascarpone ricotta =prim`,
-    kjott: `pancetta filet pulled_pork pulled_chicken =chicken kjøtt kylling kyllingfilet kyllingbryst lårfilet kyllinglår
+    kjott: `pancetta pulled_pork pulled_chicken =chicken kjøtt kylling kyllingfilet kyllingbryst lårfilet kyllinglår
       kyllingvinger kyllingklubber vingeklubber svin svinekjøtt storfe =biff biffer entrecôte entrecote indrefilet
       ytrefilet mørbrad karbonadedeig kjøttdeig =deig pølse pølser wienerpølser grillpølser bacon baconterninger
       kalkun =lam lammekjøtt lammelår fårikål ribbe pinnekjøtt svinestek koteletter kotelett medisterkaker
       medisterdeig kebab hamburger burger burgere kjøttboller nakkekoteletter svinenakke karbonader kyllingpølse
       hvalbiff reinsdyr elg hjort andebryst svineknoke svinekam strimler snadder`,
-    fisk: `laks *laks laksefilet torsk =sei hyse lysing ørret reker =reke *reker scampi kongekrabbe krabbe blåskjell
+    fisk: `laks *laks laksefilet torsk torskefilet =sei seifilet hyse hysefilet sildefilet ørretfilet lysingfilet lysing ørret reker =reke *reker scampi kongekrabbe krabbe blåskjell
       skalldyr fiskefilet =fisk fiskeboller fiskepudding sild spekesild klippfisk tørrfisk makrell kveite breiflabb
       steinbit tunfiskbiff =fish`,
     frukt: `=chili gresskar spisskål avocado =dadler rosiner oliven =bær frukt grønt grønnsaker eple epler banan bananer
@@ -239,11 +255,12 @@ export function keywordCategory(text) {
  * Returns a category id that exists in `categories`, or null (= Ukategorisert).
  */
 export function makeClassifier(categories, rules) {
-  const valid = new Set(categories.map((c) => c.id));
+  // tolerant: null or odd entries (an old or broken backup) are skipped, never thrown on
+  const valid = new Set((Array.isArray(categories) ? categories : []).filter((c) => c && typeof c === 'object' && c.id != null).map((c) => String(c.id)));
   const eanRules = new Map();
   const textRules = [];
-  for (const r of rules || []) {
-    if (!valid.has(r.categoryId)) continue;
+  for (const r of Array.isArray(rules) ? rules : []) {
+    if (!r || typeof r !== 'object' || r.pattern == null || !valid.has(String(r.categoryId))) continue;
     if (r.type === 'ean') eanRules.set(String(r.pattern).trim(), r.categoryId);
     else textRules.push({ p: normalize(r.pattern), c: r.categoryId });
   }

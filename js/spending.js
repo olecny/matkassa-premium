@@ -18,7 +18,8 @@ export function toNumber(v) {
 
 const pad = (n) => String(n).padStart(2, '0');
 /** A value that was given as a number but isn't a finite one (e.g. 1e309 → Infinity): never read it as 0. */
-export const notFinite = (v) => (typeof v === 'number' ? !Number.isFinite(v) : v != null && v !== '' && /\d/.test(String(v)) && toNumber(v) === null);
+/** Also text that isn't a number at all ("abc"): never read it as 0 kr. Blank or "-" counts as missing, not bad. */
+export const notFinite = (v) => (typeof v === 'number' ? !Number.isFinite(v) : v != null && typeof v !== 'object' && /[\p{L}\d]/u.test(String(v)) && toNumber(v) === null);
 
 /** Parse "24.10.2026 17:32", "24.10.2026", "2026-10-24T17:32:00+02:00", epoch ms. Returns {date, time}. */
 export function parseWhen(v) {
@@ -274,19 +275,69 @@ export function validateReceipts(list, now = Date.now()) {
   const limit = isoDay(new Date(+now + 864e5)); // tomorrow is still fine (time zones, a receipt just after midnight)
   const receipts = [];
   const rejected = [];
-  for (const r of list || []) {
-    if (!r) continue;
+  /** Sane range: no receipt before 2000, none at 100 000 kr or more (a typo or a broken file, not groceries). */
+  const MIN_DATE = '2000-01-01';
+  const MAX_TOTAL = 100000;
+  for (const r of Array.isArray(list) ? list : []) {
+    if (!r || typeof r !== 'object' || Array.isArray(r)) continue;
     const label = `Kvitteringen ${nbDate(r.date)}${r.store || r.chain ? ` fra ${r.store || r.chain}` : ''}`;
     let reason = null;
     let message = '';
     if (r._bad || !Number.isFinite(r.total)) { reason = 'tall'; message = `${label} har et beløp som ikke er et gyldig tall, og ble hoppet over.`; }
     else if (r.total < 0) { reason = 'negativ'; message = `${label} har et negativt beløp (${nbKr(r.total)}), og ble hoppet over.`; }
+    else if (r.total >= MAX_TOTAL) { reason = 'stor'; message = `${label} er på ${nbKr(r.total)}, som er urimelig mye for én handel, og ble hoppet over.`; }
+    else if (typeof r.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(r.date) || Number.isNaN(Date.parse(r.date))) { reason = 'dato'; message = `${label} mangler en gyldig dato, og ble hoppet over.`; }
+    else if (r.date < MIN_DATE) { reason = 'gammel'; message = `${label} har en dato før år 2000, og ble hoppet over.`; }
     else if (r.date > limit) { reason = 'fremtid'; message = `${label} har en dato fram i tid, og ble hoppet over.`; }
     if (reason) { rejected.push({ id: r.id, reason, message }); continue; }
     const { _bad, ...clean } = r;
+    clean.lines = Array.isArray(r.lines) ? r.lines.filter((l) => l && typeof l === 'object' && !notFinite(l.amount)) : [];
     receipts.push(clean);
   }
   return { receipts, rejected };
+}
+
+const isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
+const str = (x) => typeof x === 'string' || (typeof x === 'number' && Number.isFinite(x));
+
+/** Categories that can be used: objects with an id. Bad entries (null, numbers, no id) are dropped. */
+export function cleanCategories(list) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const c of list) {
+    if (!isObj(c) || !str(c.id) || String(c.id).trim() === '' || seen.has(String(c.id))) continue;
+    seen.add(String(c.id));
+    out.push({ ...c, id: String(c.id), name: str(c.name) && String(c.name).trim() ? String(c.name) : String(c.id), color: typeof c.color === 'string' ? c.color : '#8e8e93' });
+  }
+  return out;
+}
+
+/** Rules: {type:'ean'|'text', pattern, categoryId}. */
+export function cleanRules(list) {
+  if (!Array.isArray(list)) return [];
+  return list.filter((r) => isObj(r) && str(r.pattern) && String(r.pattern).trim() && str(r.categoryId)).map((r) => ({ ...r, type: r.type === 'ean' ? 'ean' : 'text', pattern: String(r.pattern), categoryId: String(r.categoryId) }));
+}
+
+/** Shopping list items: need a text. Missing ids are filled in. */
+export function cleanList(list) {
+  if (!Array.isArray(list)) return [];
+  let n = 0;
+  return list.filter((i) => isObj(i) && str(i.text) && String(i.text).trim()).map((i) => ({ ...i, id: str(i.id) ? String(i.id) : `imp-${Date.now().toString(36)}-${n++}`, text: String(i.text), done: !!i.done }));
+}
+
+/** A backup file, checked before anything is saved. Returns {categories|null, rules, receipts, list, settings|null, rejected, dropped}.
+ * categories is null when the file has none that can be used (then the current ones are kept). */
+export function cleanBackup(b, { now = Date.now() } = {}) {
+  const src = isObj(b) ? b : {};
+  const count = (x) => (Array.isArray(x) ? x.length : 0);
+  const categories = cleanCategories(src.categories);
+  const rules = cleanRules(src.rules);
+  const list = cleanList(src.list);
+  const v = validateReceipts(src.receipts, now);
+  const dropped = (count(src.categories) - categories.length) + (count(src.rules) - rules.length) + (count(src.list) - list.length)
+    + (count(src.receipts) - v.receipts.length - v.rejected.length);
+  return { categories: categories.length ? categories : null, rules, receipts: v.receipts, list, settings: isObj(src.settings) ? src.settings : null, rejected: v.rejected, dropped };
 }
 
 /** Detect file type. Returns {kind:'backup'|'spending'|'trumf'|'coop', data, rejected} or throws a Norwegian error.
@@ -407,4 +458,14 @@ export function monthCompare(receipts, today = new Date()) {
     else if (r.date.startsWith(lastKey)) { lastAll += t; if (r.date.slice(8, 10) <= day) lastSoFar += t; }
   }
   return { thisKey, lastKey, now, count, lastSoFar, lastAll };
+}
+
+/** Error → a sentence for a toast. Our own errors are already Norwegian; a raw JS or network error is not shown as is. */
+export function friendlyError(e) {
+  const m = String((e && e.message) || e || '').trim();
+  const name = e && e.name;
+  if (/failed to fetch|networkerror|load failed|network request failed|timed? ?out|aborted/i.test(m)) return 'Fikk ikke kontakt. Sjekk nettet og prøv igjen.';
+  if (!m || ['TypeError', 'ReferenceError', 'SyntaxError', 'RangeError', 'InternalError', 'DataCloneError', 'InvalidStateError'].includes(name)
+    || /is not (a function|defined|iterable|an object|valid JSON)|cannot read|undefined|null|unexpected (token|end)|JSON\.parse|\bat position\b/i.test(m)) return 'Noe gikk galt. Prøv igjen.';
+  return m;
 }
