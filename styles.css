@@ -564,7 +564,7 @@ dialog label.check input { width: 22px; height: 22px; accent-color: var(--accent
 /* ---------- Tab bar: material, sliding indicator ---------- */
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  display: grid; grid-template-columns: 1fr 1fr 1.32fr 1fr 1fr; /* room for "Handleliste" with a badge and Større tekst */
   background: var(--material-tab);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   backdrop-filter: blur(20px) saturate(180%);
@@ -577,7 +577,8 @@ dialog label.check input { width: 22px; height: 22px; accent-color: var(--accent
   font-size: .75rem; font-weight: 600; letter-spacing: 0;
   transition: color var(--dur-ui) ease;
 }
-.tabbar button > span:not(.badge) { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 2px; }
+.tabbar button { min-width: 0; }
+.tabbar button > span:not(.badge) { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 1px; }
 .tabbar .i-fill { display: none; fill: currentColor; stroke: none; }
 .tabbar button[aria-current="page"] .i-line { display: none; }
 .tabbar button[aria-current="page"] .i-fill { display: block; }
@@ -708,6 +709,10 @@ dialog label.check input { width: 22px; height: 22px; accent-color: var(--accent
 .your-data dd { margin: 0; color: var(--text-2); line-height: 1.45; }
 .your-data .linkish { margin-top: 8px; padding-left: 0; }
 .your-data .kv { margin-top: 12px; }
+/* the facts list keeps its two columns: no question-style spacing on its terms (it pushed rows out of line) */
+.your-data dl.kv { grid-template-columns: auto 1fr; gap: 6px 14px; align-items: baseline; }
+.your-data .kv dt { margin: 0; font-weight: 400; font-size: inherit; color: var(--text-3); }
+.your-data .kv dd { color: var(--text); line-height: inherit; text-align: right; }
 .danger-zone { box-shadow: var(--shadow-card), inset 0 0 0 1px color-mix(in srgb, var(--danger) 30%, transparent); }
 .danger-zone h2 { color: var(--danger); }
 .btn-danger-solid { background: var(--danger); color: #fff; }
@@ -765,7 +770,7 @@ dialog label.check input { width: 22px; height: 22px; accent-color: var(--accent
 
 /* ---------- Round 4: "Større tekst" (all sizes are rem, so the whole UI scales) ---------- */
 html.big-text { font-size: 118.75%; }
-html.big-text .tabbar button { font-size: .8125rem; }
+html.big-text .tabbar button { font-size: .6875rem; } /* the root is already larger: about 13 px */
 html.big-text .chips { flex-wrap: wrap; -webkit-mask-image: none; mask-image: none; }
 html.big-text input, html.big-text select, html.big-text textarea { font-size: 19px; }
 
@@ -801,3 +806,10 @@ html.big-text input, html.big-text select, html.big-text textarea { font-size: 1
   .card, .offer, .item, .feat { box-shadow: 0 0 0 1px var(--separator); }
   .chip, .btn, .search, .add-row input { box-shadow: inset 0 0 0 1px var(--separator); }
 }
+
+/* start-up failed: a way out instead of a blank screen */
+#crash { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 16px; background: var(--bg); color: var(--text); }
+#crash .crash-box { max-width: 420px; display: grid; gap: 12px; }
+#crash h2 { margin: 0; font-size: 1.25rem; }
+#crash p { margin: 0; color: var(--text-2, inherit); line-height: 1.45; }
+#crash .btn { min-height: 44px; }

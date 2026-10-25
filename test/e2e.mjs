@@ -689,7 +689,7 @@ try {
   await tab('forbruk');
   check(/ikke gyldig JSON/.test(await importFixture(path.join(FAKE, 'not-json-FAKE.json'))), 'bad import: not JSON → clear message');
   check(/Fant ingen kvitteringer/.test(await importFixture(path.join(FAKE, 'junk-FAKE.json'))), 'bad import: unknown JSON → clear message');
-  check(/Trumf: 1 nye/.test(await importFixture(path.join(FAKE, 'trumf-FAKE.json'))), 'import: Trumf innsyn (fake)');
+  check(/Trumf: 1 ny kvittering/.test(await importFixture(path.join(FAKE, 'trumf-FAKE.json'))), 'import: Trumf innsyn (fake)');
   check(/Coop: 2 nye/.test(await importFixture(path.join(FAKE, 'coop-innsyn-FAKE.csv'))), 'import: Coop innsyn CSV (fake, guessed format)');
 
   // 3. Sync from a (fake) private repo with a (fake) token
@@ -724,6 +724,27 @@ try {
   const st = await evaluate(`const db = await new Promise(r => { const q = indexedDB.open('${APP_DB}'); q.onsuccess = () => r(q.result); }); return await new Promise(r => { const q = db.transaction('kv').objectStore('kv').get('settings'); q.onsuccess = () => r(q.result); });`);
   check(st.sync.repo === FAKE_REPO && st.sync.token === FAKE_TOKEN && st.sync.path === 'spending.json', 'restore: backup cannot change this device\'s sync repo/token/path');
   check(st.area === null && Array.isArray(st.chains) && Array.isArray(st.hiddenChains), 'restore: broken area/chains in a backup are sanitised');
+
+  // 4c. A backup with null and broken entries (Maria 4b): checked before anything is saved, and the app still starts
+  const poisoned = JSON.parse(backup);
+  poisoned.categories = [null, 7, ...poisoned.categories, { name: 'uten id (FAKE)' }];
+  poisoned.rules = [null, ...(poisoned.rules || []), { pattern: null, categoryId: 'meieri' }];
+  poisoned.list = [null, 'bare tekst', ...(poisoned.list || [])];
+  poisoned.receipts = [null, ...(poisoned.receipts || []),
+    { id: 'old-FAKE', date: '1900-01-01', total: 10, store: 'FAKE' },
+    { id: 'huge-FAKE', date: '2026-10-01', total: 99999999999, store: 'FAKE' },
+    { id: 'abc-FAKE', date: '2026-10-01', total: 'abc', store: 'FAKE' }];
+  const poisonFile = path.join(OUT, 'backup-poisoned-FAKE.json');
+  fs.writeFileSync(poisonFile, JSON.stringify(poisoned));
+  const poisonToast = await importFixture(poisonFile);
+  check(/hoppet over/.test(poisonToast) && /før år 2000/.test(poisonToast) && /urimelig mye/.test(poisonToast), 'restore: broken entries are skipped, with a message', poisonToast.slice(0, 200));
+  const stored = await evaluate(`const db = await new Promise(r => { const q = indexedDB.open('${APP_DB}'); q.onsuccess = () => r(q.result); });
+    const get = (k) => new Promise(r => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => r(q.result); });
+    const out = {}; for (const k of ['categories', 'rules', 'list', 'receipts']) { const v = await get(k); out[k] = Array.isArray(v) && v.every((x) => x && typeof x === 'object'); }
+    out.noBad = !(await get('receipts')).some((r) => /-FAKE$/.test(r.id) && /^(old|huge|abc)/.test(r.id)); return out;`);
+  check(Object.values(stored).every(Boolean), 'restore: nothing broken reaches the database', JSON.stringify(stored));
+  await navigate(BASE + 'index.html#hjem');
+  check(await waitFor(`document.querySelector('#home-body') && document.querySelector('#home-body').children.length > 0`) && !(await evaluate(`return !!document.querySelector('#crash');`)), 'restore: the app starts normally after a broken backup');
 
   // 5. Learning: "Tilbud for deg", EAN vs name
   await tab('tilbud');
@@ -866,6 +887,7 @@ try {
   const rowH = await evaluate(`return Math.round([...document.querySelectorAll('#list-items .item')].find((li) => /Ikke på tilbud/.test(li.textContent) || li.querySelector('.deal'))?.getBoundingClientRect().height || 0);`);
   check(rowH >= 44 && rowH <= 60, 'r4 list: compact rows (~52 px)', `${rowH}px`);
   check(await evaluate(`return document.querySelectorAll('#list-items .group-h').length >= 2;`), 'r4 list: grouped by category');
+  check(await evaluate(`return [...document.querySelectorAll('.tabbar button > span')].every((sp) => sp.scrollWidth <= sp.clientWidth + 1) && !document.querySelector('#list-badge').hidden;`), 'r4 tabs: "Handleliste" fits next to its badge at 390 px');
   fixtureCheck(await evaluate(`return !document.querySelector('#list-total').hidden && /ca\\./.test(document.querySelector('#list-total').textContent) && /Billigst samlet/.test(document.querySelector('#list-total').textContent);`), 'r4 list: total and cheapest store');
   fixtureCheck(await evaluate(`return document.querySelectorAll('#list-usual [data-usual]').length > 0;`), 'r4 list: "Det du pleier å kjøpe" chips from the receipts');
   // swipe right = check off, swipe left = delete (+ Angre)
@@ -919,8 +941,12 @@ try {
   const bigText = await evaluate(`return { on: document.documentElement.classList.contains('big-text'), fs: parseFloat(getComputedStyle(document.documentElement).fontSize) };`);
   check(bigText.on && bigText.fs > 18, 'r4 mer: "Større tekst" makes all text bigger', JSON.stringify(bigText));
   check(await noHScroll(), 'r4 mer: no horizontal scroll with bigger text');
+  const tabClip = () => evaluate(`return [...document.querySelectorAll('.tabbar button > span')].filter((sp) => sp.scrollWidth > sp.clientWidth + 1).map((sp) => sp.textContent).join(', ');`);
+  check(!(await tabClip()), 'r4 tabs: no tab label cut off with Større tekst and a badge', await tabClip());
   await evaluate(`document.querySelector('[data-setting="bigText"]').click(); return true;`);
   await merPage('personvern');
+  const kvOff = await evaluate(`return [...document.querySelectorAll('#more-body dl.kv dt')].map((dt) => Math.abs(dt.getBoundingClientRect().top - dt.nextElementSibling.getBoundingClientRect().top)).filter((d) => d > 3).length;`);
+  check(kvOff === 0, 'r4 personvern: the facts list lines up (term next to value)', `${kvOff} rows out of line`);
   await click('[data-action="wipe-spending"]');
   await sleep(300);
   check(await evaluate(`return document.querySelector('#dlg-confirm').open && /kvitteringer slettes/.test(document.querySelector('#confirm-text').textContent);`), 'r4 mer: deleting asks first and says what goes');
@@ -978,6 +1004,18 @@ try {
   const errs = consoleErrors.filter((e) => !/ERR_INTERNET_DISCONNECTED|Failed to fetch|net::ERR_|Tjek-feil|status of 40[14]|status of 400 \(Bad Request\) https:\/\/matkassa-fake\.supabase\.co\/auth\/v1\/token\?grant_type=password/.test(e));
   check(!errs.length, 'no unexpected console errors', errs.slice(0, 5).join(' | '));
   if (dialogs.length) warn('confirm()/alert() dialogs auto-accepted', dialogs.join(' | '));
+
+  // 13. A start-up that fails shows a way out, never a blank screen (Maria 4b). Runs last: it resets the data.
+  const plural = await evaluate(`return /(^|[^\\d,])1 (varer|kvitteringer|regler)\\b/.test(document.body.innerText);`);
+  check(!plural, 'r4 text: "1 vare", not "1 varer"');
+  const { identifier } = await send('Page.addScriptToEvaluateOnNewDocument', { source: `{ const q = Document.prototype.querySelector; Document.prototype.querySelector = function (s) { if (s === '#home-body') throw new Error('FAKE start-up failure'); return q.call(this, s); }; }` }, S);
+  await navigate(BASE + 'index.html#hjem');
+  check(await waitFor(`!!document.querySelector('#crash') && /Noe gikk galt/.test(document.querySelector('#crash').textContent)`), 'crash: a failed start shows "Noe gikk galt – tilbakestill data?"');
+  await send('Page.removeScriptToEvaluateOnNewDocument', { identifier }, S);
+  try { await evaluate(`document.querySelector('#crash-reset').click(); return true;`); } catch { /* reloading */ }
+  await sleep(1500);
+  check(await waitFor(`!document.querySelector('#crash') && document.querySelector('#home-body') && document.querySelector('#home-body').children.length > 0`, 10000)
+    && (await kv('list') ?? []).length === 0 && (await kv('settings')) !== null, 'crash: "Tilbakestill data" clears the data (keeps settings) and the app starts');
 } catch (e) {
   check(false, 'test run crashed', e.stack || e.message);
 } finally {

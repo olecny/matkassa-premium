@@ -84,8 +84,12 @@ export function watchLargeTitle(largeTitle, bar) {
 }
 
 /** Slide the tab indicator under the current tab. Transform is set on the indicator itself. */
-export function moveTabIndicator(indicator, index) {
-  if (indicator) indicator.style.transform = `translateX(${index * 100}%)`;
+export function moveTabIndicator(indicator, index, button) {
+  if (!indicator) return;
+  if (button && button.offsetWidth) { // columns are not all the same width ("Handleliste" gets more room)
+    indicator.style.width = `${button.offsetWidth}px`;
+    indicator.style.transform = `translateX(${button.offsetLeft}px)`;
+  } else indicator.style.transform = `translateX(${index * 100}%)`;
 }
 
 /**
