@@ -1,6 +1,6 @@
 // Learns what the user usually buys from their own receipts (on this device only), and scores offers against it.
 // Matching: barcode (EAN/GTIN) first wherever both the receipt line and the offer have one, name-based as fallback.
-import { normalize, tokens } from './categories.js';
+import { normalize, tokens, wordMatch, keywordCategory, BRANDS } from './categories.js';
 
 const HALF_LIFE_DAYS = 120; // a purchase four months ago counts half
 const SKIP_LINE = /^(pant|bærepose|bæreposer|pose)\b/;
@@ -66,6 +66,7 @@ export function buildProfile(receipts, opts = {}) {
     const shown = key.startsWith('ean:') ? productKey(p.name) || p.name : key;
     const prod = {
       name: titleCase(shown.split(' ').filter((t) => t.length > 1 && !GENERIC.has(t)).join(' ') || shown),
+      type: words.filter((x) => !BRANDS.has(x.t)).map((x) => x.t), // the words that say what it is (not who made it)
       n: p.n,
       w: Math.sqrt(p.w / maxW), // sqrt: favourites lead, but occasional buys still count
       words,
@@ -79,7 +80,20 @@ export function buildProfile(receipts, opts = {}) {
   return { products: list, byEan, receipts: (receipts || []).length };
 }
 
-const wordHit = (w, t) => (w === t ? 1 : w.length >= 4 && t.length >= 4 && (w.endsWith(t) || t.endsWith(w)) ? 0.6 : 0);
+/**
+ * How well an offer word w matches a bought product's word t: 1 = same word; 0.6 = one is the other's compound
+ * head ("lettmelk" ~ "melk"); 0.5 = both end in the same known word ("lettmelk" ~ "helmelk"). A front that makes it
+ * another product never counts ("sjokomelk" is not milk), and neither does a shared start ("melkesjokolade").
+ */
+function wordHit(w, t) {
+  if (w === t) return 1;
+  if (wordMatch(t, w) === 2 || wordMatch(w, t) === 2) return 0.6;
+  for (let n = Math.min(w.length, t.length) - 1; n >= 4; n--) {
+    const tail = w.slice(-n);
+    if (t.endsWith(tail) && keywordCategory(tail) && wordMatch(tail, w) === 2 && wordMatch(tail, t) === 2) return 0.5;
+  }
+  return 0;
+}
 
 /**
  * Score an offer against the profile. Returns {score, because, via} where because is the bought product
@@ -109,13 +123,15 @@ export function scoreOffer(profile, words, offer = {}) {
     if (!p.total) continue;
     if (cat && p.cat && !LOOSE_CATS.has(p.cat) && p.cat !== cat) continue;
     let got = 0;
+    let typeHit = !p.type || !p.type.length; // a product named only by brand can still match on the brand
     for (const { t, idf } of p.words) {
       let h = 0;
       for (const w of ws) if ((h = Math.max(h, wordHit(w, t))) === 1) break;
       got += h * idf;
+      if (h >= 0.5 && p.type && p.type.includes(t)) typeHit = true;
     }
     const cover = got / p.total;
-    if (cover < 0.5) continue;
+    if (cover < 0.5 || !typeHit) continue;
     const s = cover * p.w;
     if (s > score) { score = s; because = p; }
   }

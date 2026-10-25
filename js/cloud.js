@@ -6,7 +6,7 @@
 import { CLOUD } from './cloud-config.js';
 
 export const COLLECTIONS = ['receipts', 'list_items', 'categories', 'rules'];
-export const SETTINGS_KEYS = ['area', 'chains', 'hiddenChains']; // never `sync` (GitHub key) or `geo` (per device)
+export const SETTINGS_KEYS = ['area', 'chains', 'hiddenChains', 'foodOnly', 'budget']; // never `sync` (GitHub key) or `geo` (per device)
 const CHUNK = 200;
 
 export const cloudConfigured = (c = CLOUD) =>

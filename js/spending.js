@@ -17,6 +17,8 @@ export function toNumber(v) {
 }
 
 const pad = (n) => String(n).padStart(2, '0');
+/** A value that was given as a number but isn't a finite one (e.g. 1e309 → Infinity): never read it as 0. */
+export const notFinite = (v) => (typeof v === 'number' ? !Number.isFinite(v) : v != null && v !== '' && /\d/.test(String(v)) && toNumber(v) === null);
 
 /** Parse "24.10.2026 17:32", "24.10.2026", "2026-10-24T17:32:00+02:00", epoch ms. Returns {date, time}. */
 export function parseWhen(v) {
@@ -74,7 +76,9 @@ export function parseTrumf(json) {
       };
     });
     const lineSum = lines.reduce((s, l) => s + l.amount, 0);
-    const total = toNumber(pick(r, ['totalBelop', 'totalbeløp', 'belop', 'beløp', 'sum', 'total', 'totalsum'])) ?? lineSum;
+    const rawTotal = pick(r, ['totalBelop', 'totalbeløp', 'belop', 'beløp', 'sum', 'total', 'totalsum']);
+    const total = toNumber(rawTotal) ?? lineSum;
+    const bad = notFinite(rawTotal) || (pick(r, ['varelinjer', 'varer']) || []).some((l) => notFinite(pick(l, ['vareBelop', 'vareBeløp', 'belop', 'beløp', 'sum', 'amount'])));
     const chain = String(pick(r, ['kjede', 'chain']) || '').trim();
     const store = String(pick(r, ['butikknavn', 'butikk', 'store']) || chain).trim();
     const no = pick(r, ['kvitteringsnummer', 'kvitteringsnr', 'id']);
@@ -88,6 +92,7 @@ export function parseTrumf(json) {
       total: Math.round(total * 100) / 100,
       currency: 'NOK',
       lines,
+      ...(bad ? { _bad: 'tall' } : {}),
     });
   }
   return receipts;
@@ -112,7 +117,9 @@ export function parseSpending(json) {
       category: l.category || null,
     }));
     const total = toNumber(r.total) ?? lines.reduce((s, l) => s + l.amount, 0);
+    const bad = notFinite(r.total) || (r.lines || []).some((l) => notFinite(l && l.amount));
     return {
+      ...(bad ? { _bad: 'tall' } : {}),
       id: String(r.id || `${r.source || 'import'}-${when.date}-${r.store || ''}-${total}-${i}`),
       source: r.source || 'import',
       chain: r.chain || r.store || '',
@@ -200,6 +207,8 @@ export function parseCoopRows(rows) {
     const key = perLine ? (m.receipt && r[m.receipt] ? `n:${r[m.receipt]}` : `${when.date}|${time || ''}|${store}`) : `row:${groups.size}`;
     let g = groups.get(key);
     if (!g) { g = { no: m.receipt ? r[m.receipt] : null, date: when.date, time, store, total: null, lines: [] }; groups.set(key, g); }
+    if (m.total && notFinite(r[m.total])) g.bad = true;
+    if (m.amount && notFinite(r[m.amount])) g.bad = true;
     if (m.total && toNumber(r[m.total]) != null) g.total = toNumber(r[m.total]);
     if (perLine) {
       const amount = toNumber(r[m.amount]) ?? 0;
@@ -210,8 +219,8 @@ export function parseCoopRows(rows) {
   const out = [];
   for (const g of groups.values()) {
     const total = g.total ?? g.lines.reduce((s, l) => s + l.amount, 0);
-    if (!Number.isFinite(total)) continue;
     out.push({
+      ...(g.bad || !Number.isFinite(total) ? { _bad: 'tall' } : {}),
       id: `coop-${g.no || `${g.date}-${g.time || ''}-${g.store}-${Math.round(total * 100)}`}`,
       source: 'coop', chain: coopChain(g.store), store: g.store, date: g.date, time: g.time,
       total: Math.round(total * 100) / 100, currency: 'NOK', lines: g.lines,
@@ -252,34 +261,66 @@ export function dedupeReceipts(list) {
   return { receipts: list.filter((r) => !drop.has(r && r.id)), removed: [...drop] };
 }
 
-/** Detect file type. Returns {kind:'backup'|'spending'|'trumf'|'coop', data} or throws a Norwegian error. */
-export function detectImport(json) {
-  if (json && json.schema === BACKUP_SCHEMA) return { kind: 'backup', data: json };
-  if (json && json.schema === SPENDING_SCHEMA) return { kind: 'spending', data: parseSpending(json) || [] };
+const isoDay = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const nbDate = (iso) => (iso ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}` : 'ukjent dato');
+const nbKr = (n) => `${n.toLocaleString('nb-NO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kr`;
+
+/**
+ * Drop receipts that can't be right: a total or line amount that isn't a finite number (1e309), a negative total, or
+ * a date more than one day in the future. Returns {receipts, rejected:[{id, reason, message}]} with a friendly
+ * Norwegian message per rejected receipt. now = Date or ms.
+ */
+export function validateReceipts(list, now = Date.now()) {
+  const limit = isoDay(new Date(+now + 864e5)); // tomorrow is still fine (time zones, a receipt just after midnight)
+  const receipts = [];
+  const rejected = [];
+  for (const r of list || []) {
+    if (!r) continue;
+    const label = `Kvitteringen ${nbDate(r.date)}${r.store || r.chain ? ` fra ${r.store || r.chain}` : ''}`;
+    let reason = null;
+    let message = '';
+    if (r._bad || !Number.isFinite(r.total)) { reason = 'tall'; message = `${label} har et beløp som ikke er et gyldig tall, og ble hoppet over.`; }
+    else if (r.total < 0) { reason = 'negativ'; message = `${label} har et negativt beløp (${nbKr(r.total)}), og ble hoppet over.`; }
+    else if (r.date > limit) { reason = 'fremtid'; message = `${label} har en dato fram i tid, og ble hoppet over.`; }
+    if (reason) { rejected.push({ id: r.id, reason, message }); continue; }
+    const { _bad, ...clean } = r;
+    receipts.push(clean);
+  }
+  return { receipts, rejected };
+}
+
+/** Detect file type. Returns {kind:'backup'|'spending'|'trumf'|'coop', data, rejected} or throws a Norwegian error.
+ * Receipts that can't be right are left out of data and listed in rejected (see validateReceipts). */
+export function detectImport(json, { now = Date.now() } = {}) {
+  if (json && json.schema === BACKUP_SCHEMA) return { kind: 'backup', data: json, rejected: [] };
+  const done = (kind, list) => { const v = validateReceipts(list, now); return { kind, data: v.receipts, rejected: v.rejected }; };
+  if (json && json.schema === SPENDING_SCHEMA) return done('spending', parseSpending(json) || []);
   const t = parseTrumf(json);
-  if (t && t.length) return { kind: 'trumf', data: t };
+  if (t && t.length) return done('trumf', t);
   const s = parseSpending(json);
-  if (s && s.length) return { kind: 'spending', data: s };
+  if (s && s.length) return done('spending', s);
   const rows = findArray(json, (r) => r && typeof r === 'object' && !Array.isArray(r) && colMap(Object.keys(r)).date);
   const c = parseCoopRows(rows);
-  if (c) return { kind: 'coop', data: c };
+  if (c) return done('coop', c);
   throw new Error('Fant ingen kvitteringer i fila. Støttet: Trumf-innsyn (JSON), Coop-innsyn (CSV/JSON), Matkassa spending.json eller Matkassa-backup.');
 }
 
 /** Text file → same as detectImport. JSON first; otherwise CSV (Coop innsyn). */
-export function detectImportText(text) {
+export function detectImportText(text, opts = {}) {
   let json;
   try { json = JSON.parse(text); } catch (e) {
     const rows = parseCSV(text);
     const c = rows.length ? parseCoopRows(rows) : null;
-    if (c) return { kind: 'coop', data: c };
+    if (c) { const v = validateReceipts(c, opts.now ?? Date.now()); return { kind: 'coop', data: v.receipts, rejected: v.rejected }; }
     throw new Error(rows.length ? 'Fant ingen kvitteringer i CSV-fila (trenger minst dato og beløp).' : 'Fila er ikke gyldig JSON eller CSV');
   }
-  return detectImport(json);
+  return detectImport(json, opts);
 }
 
 /** Merge receipts by id, then collapse the same purchase from different sources. Returns {receipts, added, updated, duplicates}. */
 export function mergeReceipts(existing, incoming) {
+  existing = (existing || []).filter((r) => r && r.id != null); // tolerate holes (null/undefined) in stored data
+  incoming = (incoming || []).filter((r) => r && r.id != null);
   const map = new Map(existing.map((r) => [r.id, r]));
   let added = 0;
   let updated = 0;
@@ -348,15 +389,18 @@ export function summarize(receipts, classify, categories) {
   return { months, uncat: [...uncat.values()].sort((a, b) => b.amount - a.amount) };
 }
 
-/** This month so far vs the same days of last month (fair mid-month), plus last month's full total. today = 'YYYY-MM-DD'. */
-export function monthCompare(receipts, today) {
+/** This month so far vs the same days of last month (fair mid-month), plus last month's full total.
+ * today = a Date (local day) or an ISO string ('YYYY-MM-DD' or a full timestamp). */
+export function monthCompare(receipts, today = new Date()) {
+  today = today instanceof Date ? isoDay(today) : String(today).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(today)) throw new Error('monthCompare: ugyldig dato');
   const thisKey = today.slice(0, 7);
   const [y, m] = thisKey.split('-').map(Number);
   const d = new Date(y, m - 2, 1);
   const lastKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   const day = today.slice(8, 10);
   let now = 0, lastSoFar = 0, lastAll = 0, count = 0;
-  for (const r of receipts) {
+  for (const r of receipts || []) {
     if (!r || typeof r.date !== 'string') continue;
     const t = Number(r.total) || 0;
     if (r.date.startsWith(thisKey) && r.date.slice(8, 10) <= day) { now += t; count += 1; }

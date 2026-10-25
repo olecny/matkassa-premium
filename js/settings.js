@@ -3,12 +3,20 @@ export const DEFAULT_SYNC = { repo: '', path: 'spending.json', token: '', lastSy
 // No personal defaults: every user points the app at their own private data repo (or none) in Mer.
 // geo: first-run location flow. null = never asked, 'asked' = asked once without an answer (offer the button, don't
 // prompt again), 'done' = area found or the user said no (then the default area is used).
-export const defaultSettings = () => ({ chains: [], hiddenChains: [], area: null, geo: null, sync: { ...DEFAULT_SYNC } });
+// foodOnly: "Kun mat" (on by default) hides non-food offers. budget: monthly food budget in kr (null = none).
+// bigText: "Større tekst". chainsSeen / startDone: the "Kom i gang" card on Hjem.
+export const defaultSettings = () => ({
+  chains: [], hiddenChains: [], area: null, geo: null, sync: { ...DEFAULT_SYNC },
+  foodOnly: true, budget: null, bigText: false, chainsSeen: false, startDone: false,
+});
 const GEO_STATES = new Set(['asked', 'done']);
 const validGeo = (v) => (GEO_STATES.has(v) ? v : null);
 
 const strings = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.length < 64) : []);
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+const bool = (v, d) => (typeof v === 'boolean' ? v : d);
+/** A usable monthly budget in kr (1–1 000 000), or null. */
+export const validBudget = (v) => { const n = num(typeof v === 'string' ? Number(v.replace(/\s/g, '').replace(',', '.')) : v); return n && n >= 1 && n <= 1e6 ? Math.round(n) : null; };
 
 /** A usable area {name, lat, lng, radius} or null (then the app uses its default area). */
 export function validArea(a) {
@@ -54,5 +62,10 @@ export function mergeSettings(current, incoming, { fromBackup = false } = {}) {
     // Location permission is per device, like the sync key: a backup never changes it.
     geo: fromBackup || !('geo' in inc) ? validGeo(cur.geo) : validGeo(inc.geo),
     sync: fromBackup ? validSync(cur.sync) : validSync({ ...cur.sync, ...(inc.sync || {}) }),
+    foodOnly: bool('foodOnly' in inc ? inc.foodOnly : cur.foodOnly, true),
+    budget: validBudget('budget' in inc ? inc.budget : cur.budget),
+    bigText: bool('bigText' in inc ? inc.bigText : cur.bigText, false),
+    chainsSeen: bool('chainsSeen' in inc ? inc.chainsSeen : cur.chainsSeen, false),
+    startDone: bool('startDone' in inc ? inc.startDone : cur.startDone, false),
   };
 }

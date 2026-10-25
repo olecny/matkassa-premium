@@ -1,7 +1,7 @@
 // Run: node test/unit.test.mjs   (no dependencies). All data here is FAKE test data.
 import fs from 'node:fs';
-import { detectImport, detectImportText, summarize, toNumber, mergeReceipts, monthCompare, parseCSV, dedupeReceipts } from '../js/spending.js';
-import { makeClassifier, DEFAULT_CATEGORIES, tokens } from '../js/categories.js';
+import { detectImport, detectImportText, summarize, toNumber, mergeReceipts, monthCompare, parseCSV, dedupeReceipts, validateReceipts, notFinite } from '../js/spending.js';
+import { makeClassifier, DEFAULT_CATEGORIES, tokens, matchOffer, parseQty, qtyStep, qtyText, migrateCategories, compatible, wordMatch, NON_FOOD } from '../js/categories.js';
 import { buildProfile, scoreOffer, normEan, productKey } from '../js/profile.js';
 import { parseExtraOffers, mergeExtraOffers, eanCoverage } from '../js/extra-offers.js';
 import { normalizeOffer, AREAS, DEFAULT_AREA } from '../js/tjek.js';
@@ -247,6 +247,130 @@ ok(rb(100) < 100 && rb(400) - rb(300) < rb(100) - rb(0), 'sheet: dragging up rub
   ok(d.receipts.some((r) => r.id === 'trumf-b988'), 'dedupe: same total two hours later is a different purchase');
   const m = mergeReceipts([innsyn], [api, later]);
   ok(m.receipts.length === 2 && m.duplicates === 1, 'dedupe: merge reports collapsed duplicates', JSON.stringify({ n: m.receipts.length, d: m.duplicates, a: m.added }));
+}
+
+
+/* ---------- round 4: category precision, whole-word/head matching, quantities ---------- */
+// Offer names below are public product names copied from Tjek offers for Trondheim on 2026-10-25 (not personal data).
+{
+  const C = makeClassifier(DEFAULT_CATEGORIES, []);
+  const cases = {
+    dyremat: ['DREAMIES LAKS OG KYLLING', 'SHEBA FILET KYLLING & TUNFISK', 'WHISKAS/CESAR', 'Gourmet perle/gold', 'PEDIGREE/DREAMIES DYREMAT', 'LATZ MENYBOKSER TIL KATT', 'Tyggeknute/tyggepinner', 'SHEBA SAUCE LOVER TUNFISK'],
+    ikkemat: ['NORTHPEAK ACTIVE SOKKER 3 PK', 'Roser, Chrysanthemum og Hyperikum', 'ROSEBUKETT 20 PK', 'HOT WHEELS BASIC CAR', 'XTRA KLESHENGER 5 PK', 'Halloween utskjæringssett', 'XTRA LED LYSPÆRE', 'STEKEPANNE TEFAL HARMONY 28 CM', 'North Peak Lue', 'TULIPANER'],
+    hus: ['LAMBI TOALETTPAPIR 8 PK/ TØRKEPAPIR 4 PK', 'ZENDIUM TANNKREM', 'OMO COLOR/HVITT', 'Libero Up&Go 6', 'Kubbelys', 'SUN MAXPOWER ALT I 1'],
+    torr: ['KLAR KYLLING, FISK OG GRØNNSAKSBULJONG', 'NUDLER M/KYLLINGSMAK OG KJØTTSMAK', 'Maggi juicy chicken', 'Kebabsaus', 'Bearnaisesaus', 'Havregrøt', 'HAVREGRØT MANDEL OG BLÅBÆR', 'Kokosmelk', 'Hakkede tomater', 'Coop Tortelloni', 'Potetmos', 'Blåbær-/ bringebærsyltetøy', 'Friele frokostkaffe', 'MUTTI PIZZASAUS'],
+    ferdigmat: ['MARRY ME CHICKEN', 'BALI KYLLINGGRYTE', 'PASTA SNACK POT BOLOGNESE, CARBONARA OG BACON & LØK', 'KYSTENS FISKEGRATENG', 'Stabburet pai', 'FJORDLAND MIDDAGSFAVORITTER', 'Gorbys pirog', 'Coop Kyllingnuggets'],
+    drikke: ['Iste fersken', 'ELDORADO ISTE FERSKEN OG SITRON M/U SUKKER', 'MIN FRUKT SMOOTHIE JORDBÆR, EPLE & PÆRE OG EPLE & BRINGEBÆR', 'IMSDAL NATURELL, FERSKEN OG EPLE', 'FUN LIGHT BRINGEBÆR', 'SUNNIVA EPLEJUICE', 'Coca-Cola zero/Fanta zero/ Sprite zero', 'HUSHOLDNINGSSAFT', 'PANT'],
+    snacks: ['RITZ KJEKS OG TUC KJEKS SALT/PAPRIKA', 'MAISKAKER CHIA & HAVSALT, OST OG PAPRIKA', 'Coop maiskake', 'FREIA MELKESJOKOLADE', 'COOP SPRØ CHIPS SALT/PAPRIKA', 'KINDER BUENO, BUENO WHITE OG KINDEREGG', 'MELKERULL, SMIL OG KROKANRULL'],
+    meieri: ['LITAGO JORDBÆR- OG SJOKOMELK M/U SUKKER', 'DANONINO DRIKKE JORDBÆR', 'TINE SJOKOMELK', 'Prior Frokostegg', 'PHILADELPHIA ORIGINAL, LIGHT OG LIGHT HVITLØK', 'OLIVERO SMØR-OG OLIVENOLJE', 'Middagsklar Crème fraîche', 'GRESK YOGHURT VANILJE & GRANOLA, PEKAN & HONNING OG SALTED CARAMEL', 'TINE MEIERISMØR', 'Brunost'],
+    palegg: ['Leverpostei', 'GRILSTAD GULLSALAMI', 'Kokt skinke', 'PRIOR KYLLINGBACON', 'PRIOR KYLLING SALATKJØTT SPISEKLAR', 'Coop Makrell i tomat', 'Lakserøre', 'KOKT KJØTTPÅLEGG', 'Serranoskinke'],
+    fisk: ['Røkt laks', 'FERSKE FISKEKAKER', 'Coop laksefilet', 'REKER NORSKE', 'Klippfisk', 'Sprøbakt lysing', 'Spekesild'],
+    kjott: ['KJØTTDEIG STORFE', 'Kyllingfilet', 'Kylling lårfilet', 'Coop ytrefilet av svin', 'GILDE WIENERPØLSE 8 STK', 'Falukorv', 'Baconterninger', 'Gilde Karbonader', 'Lungemos/ blodpudding'],
+    frukt: ['COOP GUL LØK 2 STK', 'Bananer', 'Paprika fargemiks 3-pk.', 'ASPARGESBØNNER', 'Änglamark koriander', 'Norske epler 6-pk.', 'GULROT'],
+    brod: ['COOP FROKOSTBRØD', 'UTVALGTE WASA KNEKKEBRØD', 'Hvitløksbaguetter 2-pk', 'Rundstykker', 'Hverdagsgrovt', 'COOP FESTKAKE'],
+    frossen: ['PIZZA GRANDIOSA PEPPERONI OG ORIGINAL PORSJON', 'FINDUS FISKEPINNER', 'COOP STEINOVNSPIZZA', 'Opphøgde potteter', 'SØRLANDSIS'],
+  };
+  const wrong = [];
+  let n = 0;
+  for (const [cat, names] of Object.entries(cases)) for (const name of names) { n++; const got = C(name); if (got !== cat) wrong.push(`${name} → ${got} (want ${cat})`); }
+  ok(!wrong.length, `categories: ${n} real Tjek offer names land in the right category`, wrong.join('; '));
+  ok(!['DREAMIES LAKS OG KYLLING', 'SHEBA FILET KYLLING & TUNFISK', 'KLAR KYLLING, FISK OG GRØNNSAKSBULJONG', 'NUDLER M/KYLLINGSMAK OG KJØTTSMAK', 'MARRY ME CHICKEN', 'PASTA SNACK POT BOLOGNESE, CARBONARA OG BACON & LØK'].some((x) => C(x) === 'kjott'), 'categories: pet food, stock, noodles and ready meals are never Kjøtt');
+  ok(!['Iste fersken', 'RITZ KJEKS OG TUC KJEKS SALT/PAPRIKA', 'HAVREGRØT MANDEL OG BLÅBÆR', 'LITAGO JORDBÆR- OG SJOKOMELK M/U SUKKER', 'Halloween utskjæringssett'].some((x) => C(x) === 'frukt'), 'categories: drinks, crackers and grøt are never Frukt/grønt');
+  ok(['hus', 'dyremat', 'ikkemat'].every((c) => NON_FOOD.has(c)) && !NON_FOOD.has('annet') && !NON_FOOD.has('meieri'), 'categories: non-food set (for "Kun mat")');
+  ok(['fisk', 'palegg', 'ferdigmat', 'dyremat', 'ikkemat'].every((id) => DEFAULT_CATEGORIES.some((c) => c.id === id)) && DEFAULT_CATEGORIES.find((c) => c.id === 'kjott').name === 'Kjøtt', 'categories: new Fisk, Pålegg, Ferdigmat, Dyremat, Ikke-mat; Kjøtt without fish');
+
+  // migration of a stored v1 list keeps user edits and adds the new ones in store order
+  const v1 = [{ id: 'meieri', name: 'Melk og ost', color: '#2a78d6' }, { id: 'kjott', name: 'Kjøtt/fisk', color: '#123456' }, { id: 'frukt', name: 'Frukt/grønt', color: '#008300' }, { id: 'c-x', name: 'Barnemat', color: '#abcdef' }, { id: 'hus', name: 'Husholdning', color: '#5f7186' }];
+  const mg = migrateCategories(v1);
+  ok(mg.find((c) => c.id === 'meieri').name === 'Melk og ost' && mg.find((c) => c.id === 'kjott').name === 'Kjøtt' && mg.find((c) => c.id === 'kjott').color === '#123456', 'migrate: renames Kjøtt/fisk, keeps user names and colours');
+  ok(mg.find((c) => c.id === 'meieri').color !== '#2a78d6' && mg.some((c) => c.id === 'c-x'), 'migrate: untouched old colours become muted, own categories stay');
+  ok(['fisk', 'palegg', 'ferdigmat', 'dyremat', 'ikkemat'].every((id) => mg.some((c) => c.id === id)) && mg.findIndex((c) => c.id === 'fisk') === mg.findIndex((c) => c.id === 'kjott') + 1, 'migrate: new categories added next to their neighbours', mg.map((c) => c.id).join());
+  ok(migrateCategories(null).length === DEFAULT_CATEGORIES.length, 'migrate: nothing stored → defaults');
+
+  // whole-word / head-noun matching
+  const offers = ['Tine sjokomelk', 'Kokosmelk', 'Hoff potetmos', 'TINE LETTMELK 1,75 L', 'Q helmelk', 'FREIA MELKESJOKOLADE', 'PHILADELPHIA ORIGINAL, LIGHT OG LIGHT HVITLØK', 'Hvitløk 3 stk', 'Bladsalat assortert', 'Paprikachips', 'Paprika rød', 'OLIVERO SMØR-OG OLIVENOLJE', 'Filippo Berio olivenolje', 'Kyllingfilet', 'DREAMIES LAKS OG KYLLING', 'Peanøttsmør', 'Tine meierismør']
+    .map((t) => ({ t, words: tokens(t), cat: C(t) || 'annet', desc: tokens(t === 'Hoff potetmos' ? 'med melk og smør' : '') }));
+  const hits = (q, o = {}) => { const p = parseQty(q); return offers.filter((x) => matchOffer(tokens(p.name), C(p.name), x.words, x.cat, { ...o, desc: x.desc }) > 0).map((x) => x.t); };
+  const melk = hits('melk', { prefix: true });
+  ok(melk.includes('TINE LETTMELK 1,75 L') && melk.includes('Q helmelk') && !melk.some((t) => /sjokomelk|Kokosmelk|potetmos|MELKESJOKOLADE/i.test(t)), 'match: "melk" finds lettmelk/helmelk, not sjokomelk, kokosmelk, potetmos or melkesjokolade', melk.join(' | '));
+  ok(hits('2 l melk').join() === hits('melk').join(), 'match: a quantity does not change what "2 l melk" matches');
+  const hv = hits('hvitløk');
+  ok(hv.length === 1 && hv[0] === 'Hvitløk 3 stk', 'match: "hvitløk" ≠ Philadelphia hvitløk', hv.join(' | '));
+  ok(!hits('sort', { prefix: true }).length, 'match: "sort" does not match "assortert"');
+  ok(hits('3 stk paprika').join() === 'Paprika rød', 'match: "3 stk paprika" ≠ paprikachips');
+  ok(hits('olivenolje').join() === 'Filippo Berio olivenolje', 'match: "olivenolje" ≠ Olivero smør- og olivenolje');
+  ok(hits('kylling').join() === 'Kyllingfilet', 'match: "kylling" → kyllingfilet (same kind), not cat food');
+  ok(hits('kyll', { prefix: true }).includes('Kyllingfilet'), 'match: search-as-you-type prefix for an unknown word');
+  ok(!hits('kyll').length, 'match: no loose prefixes on the shopping list');
+  ok(!hits('smør').includes('Peanøttsmør') && hits('smør').includes('Tine meierismør'), 'match: "smør" ≠ peanøttsmør');
+  ok(wordMatch('melk', 'lettmelk') === 2 && wordMatch('melk', 'sjokomelk') === 0 && wordMatch('melk', 'melkesjokolade') === 1 && wordMatch('sort', 'assortert') === 0, 'wordMatch: head vs front vs inside');
+  ok(compatible('kjott', 'palegg') && compatible('frukt', 'annet') && !compatible('meieri', 'snacks') && !compatible('frukt', 'meieri'), 'compatible: related categories only');
+
+  // quantities
+  const pq = (s) => { const r = parseQty(s); return `${r.name}|${r.qty}|${r.unit}`; };
+  ok(pq('2 l melk') === 'melk|2|l' && pq('500 g kjøttdeig') === 'kjøttdeig|500|g' && pq('kjøttdeig 500 g') === 'kjøttdeig|500|g', 'qty: "2 l melk", "500 g kjøttdeig", "kjøttdeig 500 g"');
+  ok(pq('3 stk paprika') === 'paprika|3|stk' && pq('epler 1 kg') === 'epler|1|kg' && pq('2x melk') === 'melk|2|stk' && pq('melk x2') === 'melk|2|stk' && pq('2 melk') === 'melk|2|stk' && pq('1,5 kg poteter') === 'poteter|1.5|kg', 'qty: stk, kg, 2x, x2, bare number, decimal comma');
+  ok(pq('melk') === 'melk|null|null' && pq('4-korn brød') === '4-korn brød|null|null' && pq('Tine helmelk 3.5%') === 'Tine helmelk 3.5%|null|null' && pq('Pepsi max 1,5') === 'Pepsi max 1,5|null|null', 'qty: names with numbers inside stay whole');
+  ok(qtyStep('g') === 100 && qtyStep('kg') === 0.5 && qtyStep('stk') === 1 && qtyText(2, 'l') === '2 l' && qtyText(1, 'stk') === '' && qtyText(1.5, 'kg') === '1,5 kg', 'qty: steps and labels');
+}
+
+/* ---------- round 4: "Tilbud for deg" reasons per product, not per brand ---------- */
+{
+  const C = makeClassifier(DEFAULT_CATEGORIES, []);
+  const pr = buildProfile([{ date: '2026-10-20', lines: Array.from({ length: 12 }, () => ({ name: 'TINE HELMELK 1.75L', amount: 30 })).concat([{ name: 'BANANER', amount: 20 }]) }], { classify: C, now: Date.parse('2026-10-24') });
+  const sc = (t) => scoreOffer(pr, tokens(t), { cat: C(t) });
+  ok(sc('Tine helmelk').score > 0.2 && sc('Q helmelk').score > 0.2, 'for deg: the same product (any brand) matches');
+  ok(sc('Tine lettmelk').score > 0, 'for deg: a close product (other milk) still matches');
+  ok(sc('TINE YOGHURT').score === 0 && sc('TINE RISLUNSJ').score === 0 && sc('TINE REVET OST').score === 0 && sc('TINE SJOKOMELK').score === 0, 'for deg: a Tine helmelk purchase is no reason for every Tine product');
+  ok(sc('FREIA MELKESJOKOLADE').score === 0, 'for deg: "melk" at the front of a word is not milk');
+}
+
+
+/* ---------- Maria round 3: import validation, monthCompare with Date, merge with holes (all FAKE data) ---------- */
+{
+  const NOW = Date.parse('2026-10-25T12:00:00');
+  const spendingFile = (receipts) => JSON.stringify({ schema: 'matkassa.spending/1', receipts });
+  const imp = detectImportText(spendingFile([
+    { id: 'ok-1', store: 'TESTBUTIKK (FAKE)', date: '2026-10-24', total: 100, lines: [] },
+    { id: 'neg-1', store: 'TESTBUTIKK (FAKE)', date: '2026-10-23', total: -50, lines: [] },
+    { id: 'fut-1', store: 'TESTBUTIKK (FAKE)', date: '2026-10-30', total: 10, lines: [] },
+    { id: 'tom-1', store: 'TESTBUTIKK (FAKE)', date: '2026-10-26', total: 10, lines: [] },
+  ]), { now: NOW });
+  ok(imp.data.map((r) => r.id).sort().join() === 'ok-1,tom-1', 'validate: keeps a normal receipt and one dated tomorrow', imp.data.map((r) => r.id).join());
+  ok(imp.rejected.length === 2 && imp.rejected.some((r) => r.id === 'neg-1' && r.reason === 'negativ') && imp.rejected.some((r) => r.id === 'fut-1' && r.reason === 'fremtid'), 'validate: rejects a negative total and a date more than a day ahead');
+  ok(imp.rejected.every((r) => /^Kvitteringen \d{2}\.\d{2}\.\d{4} fra TESTBUTIKK \(FAKE\) .*hoppet over\.$/.test(r.message)) && /negativt beløp \(−?-?50,00 kr\)/.test(imp.rejected.find((r) => r.reason === 'negativ').message), 'validate: one friendly Norwegian message per rejected receipt', imp.rejected.map((r) => r.message).join(' | '));
+  // 1e309 in JSON is Infinity: never read as 0 or Infinity
+  const inf = detectImportText('{"schema":"matkassa.spending/1","receipts":[{"id":"inf-1","store":"FAKE","date":"2026-10-20","total":1e309,"lines":[]},{"id":"inf-2","store":"FAKE","date":"2026-10-20","total":20,"lines":[{"name":"X","amount":1e309}]},{"id":"ok-2","store":"FAKE","date":"2026-10-20","total":20,"lines":[]}]}', { now: NOW });
+  ok(inf.data.map((r) => r.id).join() === 'ok-2' && inf.rejected.length === 2 && inf.rejected.every((r) => r.reason === 'tall'), 'validate: non-finite total or line amount (1e309) is rejected, not 0 or Infinity', JSON.stringify(inf.rejected.map((r) => r.id)));
+  ok(notFinite(Infinity) && notFinite('1e309') && !notFinite('24,90') && !notFinite(null) && !notFinite('') && !notFinite(0), 'validate: notFinite');
+  const tr = detectImport([{ dato: '01.01.2030 12:00', kvitteringsnummer: 'F1', kjede: 'KIWI', butikknavn: 'KIWI (FAKE)', varelinjer: [{ varenavn: 'X', vareBelop: '10,00' }] }, { dato: '03.10.2026 12:00', kvitteringsnummer: 'F2', kjede: 'KIWI', butikknavn: 'KIWI (FAKE)', totalBelop: '-12,00', varelinjer: [] }, { dato: '03.10.2026 12:00', kvitteringsnummer: 'F3', kjede: 'KIWI', varelinjer: [{ varenavn: 'X', vareBelop: '1e309' }] }], { now: NOW });
+  ok(tr.kind === 'trumf' && tr.data.length === 0 && tr.rejected.map((r) => r.reason).join() === 'fremtid,negativ,tall', 'validate: Trumf innsyn too (future, negative, non-finite)', JSON.stringify(tr.rejected));
+  const coop = detectImportText('Dato;Butikk;Totalbeløp\n03.10.2026;Coop Extra (FAKE);-99,00\n04.10.2026;Coop Extra (FAKE);1e309\n05.10.2026;Coop Extra (FAKE);45,00\n', { now: NOW });
+  ok(coop.kind === 'coop' && coop.data.length === 1 && coop.rejected.length === 2, 'validate: Coop CSV too', JSON.stringify(coop.rejected));
+  ok(validateReceipts([null, undefined, { id: 'a', date: '2026-10-01', total: 1 }], NOW).receipts.length === 1, 'validate: holes in the list are skipped');
+  ok(!('_bad' in imp.data[0]), 'validate: no internal marker left on kept receipts');
+
+  // monthCompare: Date or ISO string, month boundaries
+  const R = (date, total) => ({ id: date + total, date, total });
+  const rs = [R('2026-10-02', 300), R('2026-09-05', 100), R('2026-09-30', 50)];
+  const a = monthCompare(rs, '2026-10-24');
+  ok(JSON.stringify(monthCompare(rs, new Date(2026, 9, 24, 15, 30))) === JSON.stringify(a) && JSON.stringify(monthCompare(rs, '2026-10-24T09:00:00')) === JSON.stringify(a), 'monthCompare: a Date, an ISO day and an ISO timestamp give the same result');
+  const d31 = monthCompare([R('2026-10-31', 10), R('2026-09-30', 7), R('2026-09-01', 3)], new Date(2026, 9, 31));
+  ok(d31.thisKey === '2026-10' && d31.lastKey === '2026-09' && d31.now === 10 && d31.lastSoFar === 10 && d31.lastAll === 10, 'monthCompare: the 31st (previous month has 30 days)', JSON.stringify(d31));
+  const mar = monthCompare([R('2026-03-31', 5), R('2026-02-28', 4), R('2026-02-01', 1)], '2026-03-31');
+  ok(mar.lastKey === '2026-02' && mar.lastSoFar === 5 && mar.lastAll === 5, 'monthCompare: 31 March vs February (28 days)', JSON.stringify(mar));
+  const feb = monthCompare([R('2028-02-29', 8), R('2028-01-29', 2), R('2028-01-30', 9)], new Date(2028, 1, 29));
+  ok(feb.thisKey === '2028-02' && feb.lastKey === '2028-01' && feb.now === 8 && feb.lastSoFar === 2 && feb.lastAll === 11, 'monthCompare: leap day 29 February', JSON.stringify(feb));
+  const ny = monthCompare([R('2027-01-01', 6), R('2026-12-01', 4), R('2026-12-31', 9)], new Date(2027, 0, 1));
+  ok(ny.thisKey === '2027-01' && ny.lastKey === '2026-12' && ny.now === 6 && ny.lastSoFar === 4 && ny.lastAll === 13, 'monthCompare: New Year (1 January vs December)', JSON.stringify(ny));
+  ok(monthCompare(null, '2026-10-24').now === 0, 'monthCompare: no receipts at all');
+  let threw = false; try { monthCompare([], 'not a date'); } catch { threw = true; }
+  ok(threw, 'monthCompare: rejects a bad date instead of guessing');
+
+  // mergeReceipts tolerates holes
+  const mm = mergeReceipts([null, R('2026-10-01', 5), undefined], [R('2026-10-02', 6), null]);
+  ok(mm.receipts.length === 2 && mm.added === 1 && mm.receipts.every(Boolean), 'merge: null/undefined entries in the existing list (and the new one) are ignored');
+  ok(mergeReceipts(undefined, [R('2026-10-02', 6)]).receipts.length === 1, 'merge: no existing list at all');
 }
 
 console.log(failed ? `\n${failed} FAILED` : '\nAll unit tests passed');
