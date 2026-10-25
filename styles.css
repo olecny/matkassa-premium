@@ -813,3 +813,9 @@ html.big-text input, html.big-text select, html.big-text textarea { font-size: 1
 #crash h2 { margin: 0; font-size: 1.25rem; }
 #crash p { margin: 0; color: var(--text-2, inherit); line-height: 1.45; }
 #crash .btn { min-height: 44px; }
+/* very narrow phones (320 px): "Handleliste" must still fit its column */
+@media (max-width: 359px) {
+  .tabbar button { font-size: .6875rem; }
+  .tabbar button > span:not(.badge) { padding: 0; letter-spacing: -0.01em; }
+  html.big-text .tabbar button { font-size: .625rem; }
+}

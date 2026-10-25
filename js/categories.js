@@ -148,7 +148,7 @@ const TIERS = [
       fløte matfløte kremfløte rømme lettrømme =ost brunost geitost gulost hvitost lettost =egg *egg egg frokostegg
       norvegia jarlsberg gudbrandsdalsost fløtemysost =smør meierismør bremykt kulturmelk mozzarella parmesan
       cheddar brie feta crème creme fraîche camembert gorgonzola cambozola maasdam mascarpone ricotta =prim`,
-    kjott: `pancetta pulled_pork pulled_chicken =chicken kjøtt kylling kyllingfilet kyllingbryst lårfilet kyllinglår
+    kjott: `pancetta oksefilet filet_mignon pulled_pork pulled_chicken =chicken kjøtt kylling kyllingfilet kyllingbryst lårfilet kyllinglår
       kyllingvinger kyllingklubber vingeklubber svin svinekjøtt storfe =biff biffer entrecôte entrecote indrefilet
       ytrefilet mørbrad karbonadedeig kjøttdeig =deig pølse pølser wienerpølser grillpølser bacon baconterninger
       kalkun =lam lammekjøtt lammelår fårikål ribbe pinnekjøtt svinestek koteletter kotelett medisterkaker

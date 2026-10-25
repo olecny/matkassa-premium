@@ -263,8 +263,10 @@ export function dedupeReceipts(list) {
 }
 
 const isoDay = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const nbDate = (iso) => (iso ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}` : 'ukjent dato');
-const nbKr = (n) => `${n.toLocaleString('nb-NO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kr`;
+/** Any value → "dd.mm.yyyy" or "ukjent dato" (a backup can hold a number, null or an object here). */
+const nbDate = (iso) => (typeof iso === 'string' && /^\d{4}-\d{2}-\d{2}/.test(iso) ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}` : 'ukjent dato');
+const nbKr = (n) => (typeof n === 'number' && Number.isFinite(n) ? `${n.toLocaleString('nb-NO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kr` : 'et ukjent beløp');
+const shopName = (r) => [r.store, r.chain].find((x) => typeof x === 'string' && x.trim()) || '';
 
 /**
  * Drop receipts that can't be right: a total or line amount that isn't a finite number (1e309), a negative total, or
@@ -280,7 +282,8 @@ export function validateReceipts(list, now = Date.now()) {
   const MAX_TOTAL = 100000;
   for (const r of Array.isArray(list) ? list : []) {
     if (!r || typeof r !== 'object' || Array.isArray(r)) continue;
-    const label = `Kvitteringen ${nbDate(r.date)}${r.store || r.chain ? ` fra ${r.store || r.chain}` : ''}`;
+    const shop = shopName(r);
+    const label = `Kvitteringen ${nbDate(r.date)}${shop ? ` fra ${shop}` : ''}`;
     let reason = null;
     let message = '';
     if (r._bad || !Number.isFinite(r.total)) { reason = 'tall'; message = `${label} har et beløp som ikke er et gyldig tall, og ble hoppet over.`; }
@@ -319,11 +322,19 @@ export function cleanRules(list) {
   return list.filter((r) => isObj(r) && str(r.pattern) && String(r.pattern).trim() && str(r.categoryId)).map((r) => ({ ...r, type: r.type === 'ean' ? 'ean' : 'text', pattern: String(r.pattern), categoryId: String(r.categoryId) }));
 }
 
-/** Shopping list items: need a text. Missing ids are filled in. */
+const LIST_UNITS = new Set(['stk', 'g', 'hg', 'kg', 'l', 'dl', 'cl', 'ml', 'pk', 'boks', 'flaske', 'pose']);
+/** Shopping list items: need a text (max 200 characters); qty a number above 0 and unit a known one, else none. */
 export function cleanList(list) {
   if (!Array.isArray(list)) return [];
   let n = 0;
-  return list.filter((i) => isObj(i) && str(i.text) && String(i.text).trim()).map((i) => ({ ...i, id: str(i.id) ? String(i.id) : `imp-${Date.now().toString(36)}-${n++}`, text: String(i.text), done: !!i.done }));
+  return list.filter((i) => isObj(i) && str(i.text) && String(i.text).trim()).map((i) => ({
+    ...i,
+    id: str(i.id) ? String(i.id) : `imp-${Date.now().toString(36)}-${n++}`,
+    text: String(i.text).trim().slice(0, 200),
+    done: !!i.done,
+    qty: typeof i.qty === 'number' && Number.isFinite(i.qty) && i.qty > 0 && i.qty < 1e6 ? i.qty : null,
+    unit: LIST_UNITS.has(i.unit) ? i.unit : null,
+  }));
 }
 
 /** A backup file, checked before anything is saved. Returns {categories|null, rules, receipts, list, settings|null, rejected, dropped}.

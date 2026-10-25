@@ -65,7 +65,15 @@ function applyTextSize() {
   document.documentElement.classList.toggle('big-text', !!state.settings.bigText);
 }
 
+const DEFAULT_IDS = new Set(DEFAULT_CATEGORIES.map((c) => c.id));
+/** A category list the app can work with: at least one built-in category. Without them nothing is classified
+ * (everything Ukategorisert, "Kun mat" lets everything through). */
+const usableCategories = (cats) => Array.isArray(cats) && cats.some((c) => c && typeof c === 'object' && DEFAULT_IDS.has(c.id));
 function rebuildClassifier() {
+  if (!usableCategories(state.categories)) { // safety net for any path (sync, copy, storage): back to the defaults
+    state.categories = DEFAULT_CATEGORIES.map((c) => ({ ...c }));
+    save.categories();
+  }
   classify = makeClassifier(state.categories, state.rules);
   rebuildOfferIndex();
 }
@@ -1020,7 +1028,8 @@ async function importFile(file) {
     const b = res.data;
     if (!confirm(`Hente inn sikkerhetskopien fra ${b.exported ? new Date(b.exported).toLocaleString('nb-NO') : 'ukjent dato'}? Den erstatter kategoriene, reglene, kvitteringene og handlelisten her på telefonen.`)) return;
     const c = cleanBackup(b); // checked before anything is saved: a bad entry must never reach the database
-    if (c.categories) state.categories = c.categories;
+    if (usableCategories(c.categories)) state.categories = c.categories; // never wipe the user's categories with a broken list
+    else if (Array.isArray(b.categories) && b.categories.length) b.keptCategories = true;
     state.rules = c.rules;
     state.receipts = c.receipts;
     state.list = c.list;
@@ -1029,7 +1038,7 @@ async function importFile(file) {
     b.dropped = c.dropped;
     await Promise.all([save.categories(), save.rules(), save.receipts(), save.list(), save.settings()]);
     rebuildClassifier();
-    toast('Sikkerhetskopien er hentet inn' + (b.dropped ? `. ${b.dropped} ødelagte oppføringer ble hoppet over` : '') + rejectedText(b.rejected));
+    toast('Sikkerhetskopien er hentet inn' + (b.keptCategories ? '. Kategoriene i fila var ødelagt, så dine er beholdt' : '') + (b.dropped ? `. ${b.dropped} ${b.dropped === 1 ? "ødelagt oppføring" : "ødelagte oppføringer"} ble hoppet over` : '') + rejectedText(b.rejected));
   } else {
     const { receipts, added, updated, duplicates } = mergeReceipts(state.receipts, res.data);
     state.receipts = receipts;
@@ -1151,7 +1160,7 @@ async function copyFromOriginal() {
   const n = (k) => (Array.isArray(o && o[k]) ? o[k].length : 0);
   if (!o || !(n('receipts') || n('list') || n('rules'))) { toast('Fant ingen Matkassa-data i denne nettleseren'); return; }
   if (!confirm(`Kopiere fra Matkassa: ${count(n('receipts'), 'kvittering', 'kvitteringer')}, ${count(n('list'), 'vare', 'varer')} i handlelisten og ${count(n('rules'), 'regel', 'regler')}? Det erstatter dataene i Matkassa Premium på denne enheten. Matkassa selv endres ikke, og GitHub-nøkkelen kopieres ikke.`)) return;
-  if (Array.isArray(o.categories) && o.categories.length) state.categories = o.categories;
+  if (usableCategories(cleanCategories(o.categories))) state.categories = cleanCategories(o.categories);
   state.rules = Array.isArray(o.rules) ? o.rules : [];
   state.receipts = Array.isArray(o.receipts) ? o.receipts : [];
   state.list = Array.isArray(o.list) ? o.list : [];
@@ -1978,7 +1987,7 @@ async function start() {
     if (extraOffers && Array.isArray(extraOffers.offers)) state.extraOffers = extraOffers;
     if (list) state.list = cleanList(list);
     const cats = cleanCategories(categories);
-    if (cats.length) {
+    if (usableCategories(cats)) {
       // once: Kjøtt/fisk → Kjøtt, plus Fisk, Pålegg, Ferdigmat, Dyremat, Ikke-mat (user edits kept)
       state.categories = (catVersion || 1) < CATEGORY_VERSION ? migrateCategories(cats) : cats;
       if ((catVersion || 1) < CATEGORY_VERSION) save.categories();
