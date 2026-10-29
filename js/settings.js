@@ -5,10 +5,14 @@ export const DEFAULT_SYNC = { repo: '', path: 'spending.json', token: '', lastSy
 // prompt again), 'done' = area found or the user said no (then the default area is used).
 // foodOnly: "Kun mat" (on by default) hides non-food offers. budget: monthly food budget in kr (null = none).
 // bigText: "Større tekst". chainsSeen / startDone: the "Kom i gang" card on Hjem.
+// theme: 'auto' (follow the phone), 'dark' or 'light'. saveGoal: the savings goal on Hjem in kr (steps of 50).
 export const defaultSettings = () => ({
   chains: [], hiddenChains: [], area: null, geo: null, sync: { ...DEFAULT_SYNC },
-  foodOnly: true, budget: null, bigText: false, chainsSeen: false, startDone: false,
+  foodOnly: true, budget: null, bigText: false, chainsSeen: false, startDone: false, theme: 'auto', saveGoal: 500,
 });
+export const THEMES = ['auto', 'dark', 'light'];
+/** A savings goal in kr: 50–20 000 in steps of 50, else the default 500. */
+export const validSaveGoal = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 50 && v <= 20000 ? Math.round(v / 50) * 50 : 500);
 const GEO_STATES = new Set(['asked', 'done']);
 const validGeo = (v) => (GEO_STATES.has(v) ? v : null);
 
@@ -67,5 +71,7 @@ export function mergeSettings(current, incoming, { fromBackup = false } = {}) {
     bigText: bool('bigText' in inc ? inc.bigText : cur.bigText, false),
     chainsSeen: bool('chainsSeen' in inc ? inc.chainsSeen : cur.chainsSeen, false),
     startDone: bool('startDone' in inc ? inc.startDone : cur.startDone, false),
+    theme: THEMES.includes('theme' in inc ? inc.theme : cur.theme) ? ('theme' in inc ? inc.theme : cur.theme) : 'auto',
+    saveGoal: validSaveGoal('saveGoal' in inc ? inc.saveGoal : cur.saveGoal),
   };
 }

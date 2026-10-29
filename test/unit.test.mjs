@@ -132,7 +132,7 @@ ok(!/ease-in[;,)\s]/.test(css.replace(/ease-in-out/g, '')), 'motion: no ease-in 
 ok(!/scale\(0\)/.test(css), 'motion: nothing animates from scale(0)');
 ok(/--ease-out: cubic-bezier\(0\.23, 1, 0\.32, 1\)/.test(css) && /--ease-drawer: cubic-bezier\(0\.32, 0\.72, 0, 1\)/.test(css), 'motion: easing tokens from the skill');
 const durations = [...css.matchAll(/(\d+)ms/g)].map((m) => Number(m[1]));
-ok(durations.every((d) => d <= 400 || d === 700 || d === 1200), 'motion: UI durations ≤ 400 ms (spinner/pulse excepted)', durations.join(','));
+ok(durations.every((d) => d <= 400 || [450, 600, 700, 900, 1200].includes(d)), 'motion: UI durations ≤ 400 ms (spinner/pulse and the v0.7 figure timings from DESIGN.md excepted)', durations.join(','));
 const hovers = css.split('@media (hover: hover) and (pointer: fine)');
 ok(!/:hover/.test(hovers[0]) && hovers.length === 2 && !/:hover/.test(hovers[1].slice(hovers[1].indexOf('\n}\n'))), 'mobile: every :hover is behind (hover: hover) and (pointer: fine)');
 ok(/@media \(prefers-reduced-motion: reduce\)/.test(css) && /@media \(prefers-reduced-transparency: reduce\)/.test(css), 'a11y: reduced motion and reduced transparency handled');
@@ -504,6 +504,66 @@ function R2(date, name) { return { id: date + name, date, total: 50, store: 'FAK
   ok(!changes.some((x) => /token|FAKE-CODE/i.test(x)) && !JSON.stringify(conn.status).includes('ABCD'), 'connection: no code or token ever in a status');
   const throwing = createConnection(REMA, { id: 'x', status: async () => { throw new Error('boom'); } });
   ok((await throwing.refresh()).state === STATES.ERROR, 'connection: a provider that throws gives an error state, not a crash');
+}
+
+
+/* ---------- v0.7 Neon: WCAG contrast of the final tokens in styles.css (dark default + light) ---------- */
+{
+  const raw = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const block = (re) => { const m = re.exec(raw); if (!m) throw new Error('token block missing: ' + re); let i = m.index + m[0].length, depth = 1; const st = i; while (depth) { if (raw[i] === '{') depth++; if (raw[i] === '}') depth--; i++; } return raw.slice(st, i - 1); };
+  const tokens = (b) => Object.fromEntries([...b.matchAll(/--([a-z0-9-]+):\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]));
+  const dark = tokens(block(/:root \{/));
+  const lightBlock = block(/:root\[data-theme="light"\] \{/);
+  const light = { ...dark, ...tokens(lightBlock) };
+  const mediaLight = block(/@media \(prefers-color-scheme: light\) \{\s*:root:not\(\[data-theme="dark"\]\) \{/);
+  ok(JSON.stringify(tokens(mediaLight)) === JSON.stringify(tokens(lightBlock)), 'theme: the light tokens are the same for prefers-color-scheme and Mer → Tema (Lyst)');
+  ok(/color-scheme: dark/.test(block(/:root \{/)), 'theme: dark is the default');
+  const parse = (v) => {
+    let m = /^#([0-9a-f]{6})$/i.exec(v);
+    if (m) return [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16)).concat(1);
+    m = /^rgb\((\d+) (\d+) (\d+)(?: \/ (\d+)%)?\)$/.exec(v);
+    if (m) return [+m[1], +m[2], +m[3], m[4] ? +m[4] / 100 : 1];
+    throw new Error('colour? ' + v);
+  };
+  const over = (fg, bg) => fg.slice(0, 3).map((c, i) => c * fg[3] + bg[i] * (1 - fg[3])).concat(1);
+  const lum = (c) => { const [r, g, b] = c.slice(0, 3).map((x) => { x /= 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+  for (const [name, t] of [['dark', dark], ['light', light]]) {
+    const col = (k, on) => { const c = parse(t[k]); return c[3] < 1 ? over(c, on) : c; };
+    const bad = [];
+    const check = (fg, bg, min) => { for (const b of [].concat(bg)) { const bgc = b === 'accent-soft' || b === 'sale-soft' ? over(parse(t[b]), parse(t.surface)) : parse(t[b]); const r = ratio(col(fg, bgc), bgc); if (r < min) bad.push(`${fg} on ${b} ${r.toFixed(2)}`); } };
+    const grounds = ['bg', 'surface', 'surface-2', 'sheet'];
+    for (const fg of ['text', 'text-2', 'text-3', 'accent', 'sale', 'danger']) check(fg, grounds, 4.5);
+    check('badge', ['bg', 'surface'], 4.5);
+    check('accent-ink', 'accent', 4.5);
+    check('badge-ink', 'badge', 4.5);
+    check('danger-ink', 'danger', 4.5);
+    check('accent', 'accent-soft', 4.5);
+    check('text', 'accent-soft', 4.5);
+    check('sale', 'sale-soft', 4.5);
+    check('thumb-ink', 'thumb-bg', 4.5);
+    for (const k of Object.keys(t).filter((x) => x.startsWith('cat-'))) check(k, 'surface', 3);
+    ok(!bad.length, `contrast ${name}: all text ≥ 4.5:1, category colours ≥ 3:1 (WCAG 2.1)`, bad.join(' | '));
+  }
+  ok(Object.keys(dark).filter((k) => k.startsWith('cat-')).length === 15, 'theme: a --cat-* colour for each of the 15 default categories');
+}
+
+
+/* ---------- v0.7 figures: pure parts ---------- */
+{
+  const F = await import('../js/figures.js');
+  const lay = F.arcLayout([610, 940, 480, 260, 520, 330, 280, 300, 240, 160]); // FAKE month (DESIGN.md example)
+  ok(Math.abs(lay.reduce((a, x) => a + x.frac, 0) - 1) < 1e-9 && lay[0].start === 0 && Math.abs(lay[1].start - 610 / 4120) < 1e-9, 'donut: arcs add up to the whole ring, clockwise from the top');
+  ok(lay.every((x) => Math.abs(x.len - (x.frac * F.DONUT.C - 2)) < 1e-9), 'donut: 2 px gap between arcs');
+  ok(F.arcLayout([5]).every((x) => Math.abs(x.len - F.DONUT.C) < 1e-9) && F.arcLayout([0, 0]).every((x) => x.len === 0), 'donut: one category is a full ring, nothing spent is no arcs');
+  ok(F.arcAt(lay, 100, 20) === 0 && F.arcAt(lay, 180, 100) === 1 && F.arcAt(lay, 99, 20) === 9, 'donut: dragging finds the arc under the finger (top = first, right = second, just left of top = last)');
+  ok(F.dash(lay[1]).offset === (-lay[1].start * F.DONUT.C).toFixed(2), 'donut: the dash offset puts an arc at its start angle');
+  ok(F.meterFraction(312, 500) === 0.624 && F.meterFraction(900, 500) === 1 && F.meterFraction(0, 500) === 0 && F.meterFraction(10, 0) === 0, 'meter: fill fraction, capped at the goal');
+  ok(F.goalAfterDrag(500, 32) === 600 && F.goalAfterDrag(500, -10000) === 50 && F.goalAfterDrag(500, 1e6) === 20000 && F.goalAfterDrag(500, 5) === 500, 'meter: dragging moves the goal in steps of 50 kr within 50–20 000');
+  const offers = [0.1, 0.5, 0.25, 0.4, 0.35].map((d, i) => ({ o: { id: 'FAKE-' + i, d } }));
+  ok([...F.bestOfferIds(offers, (o) => o.d)].join() === 'FAKE-1,FAKE-3,FAKE-4', 'tilbud: the best three by discount get the glowing edge');
+  ok(F.bestOfferIds(offers, () => 0.1).size === 0, 'tilbud: no glow when nothing is a real deal (< 20 %)');
+  ok(/rotateX\(-5\.00deg\) rotateY\(5\.00deg\)/.test(F.tiltTransform(2, 1)), 'tilbud: tilt is capped at 5°');
 }
 
 console.log(failed ? `\n${failed} FAILED` : '\nAll unit tests passed');

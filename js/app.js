@@ -8,9 +8,10 @@ import { detectImport, detectImportText, mergeReceipts, summarize, monthCompare,
 import { Cloud, cloudConfigured, reconcile, pickSettings, hash, COLLECTIONS } from './cloud.js';
 import { createConnection, pickProvider, STATES } from './chains/index.js';
 import { REMA } from './chains/rema.js';
+import { DONUT, arcLayout, dash, arcAt, meterFraction, goalAfterDrag, bestOfferIds, enableTilt, shineBestOffers, reducedMotion } from './figures.js';
 import { enableSheetDrag, watchLargeTitle, moveTabIndicator, exitRow, flip, enableSwipe, haptic } from './motion.js';
 
-const APP_VERSION = '0.6.1-premium';
+const APP_VERSION = '0.7.0-premium.rc1';
 const STALE_MS = 6 * 60 * 60 * 1000;
 const PAGE = 60;
 const TABS = ['hjem', 'tilbud', 'liste', 'forbruk', 'mer'];
@@ -65,9 +66,24 @@ const save = {
 /** "Større tekst" in Mer: scales all rem-based text (the whole UI) by about 18 %. */
 function applyTextSize() {
   document.documentElement.classList.toggle('big-text', !!state.settings.bigText);
+  applyTheme();
+}
+/** Mer → Tema: 'auto' follows the phone (prefers-color-scheme), else forced dark/light. Dark is the default. */
+const THEME_COLOR = { dark: '#05070a', light: '#f1f4f7' };
+function applyTheme() {
+  const t = state.settings.theme || 'auto';
+  const root = document.documentElement;
+  if (t === 'auto') delete root.dataset.theme; else root.dataset.theme = t;
+  for (const m of document.querySelectorAll('meta[name="theme-color"]')) {
+    const scheme = /light/.test(m.media) ? 'light' : 'dark';
+    m.content = THEME_COLOR[t === 'auto' ? scheme : t];
+  }
 }
 
 const DEFAULT_IDS = new Set(DEFAULT_CATEGORIES.map((c) => c.id));
+const DEFAULT_COLOR = new Map(DEFAULT_CATEGORIES.map((c) => [c.id, c.color.toLowerCase()]));
+/** A category's display colour: the theme's --cat-* token while it has its default colour, else the user's pick. */
+const catColor = (c) => (!c ? '' : DEFAULT_COLOR.get(c.id) === String(c.color).toLowerCase() ? `var(--cat-${c.id})` : c.color);
 /** A category list the app can work with: at least one built-in category. Without them nothing is classified
  * (everything Ukategorisert, "Kun mat" lets everything through). */
 const usableCategories = (cats) => Array.isArray(cats) && cats.some((c) => c && typeof c === 'object' && DEFAULT_IDS.has(c.id));
@@ -354,18 +370,21 @@ function whyText(because, via) {
     : `Fordi du kjøper ${esc(because.name.toLowerCase())} (${because.n}×)`;
 }
 
-function offerCard({ o, fit, because, via }) {
+function offerCard({ o, fit, because, via }, best = false) {
   const added = inList(o.id);
+  const d = discount(o);
   const img = o.img
     ? `<img class="thumb" src="${esc(o.img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb none',textContent:'Bilde'}))">`
     : '<div class="thumb none">Bilde</div>';
-  return `<li class="offer">
+  return `<li class="offer${best ? ' best' : ''}" data-offer="${esc(o.id)}"${best ? ` aria-label="${esc(titleCase(o.title))}, ${esc(kr(o.price))}${d >= 0.05 ? `, minus ${Math.round(d * 100)} prosent` : ''}, beste tilbud, ${esc(o.chain)}"` : ''}>
+    <span class="tilt-light" aria-hidden="true"></span>${best ? '<span class="best-edge" aria-hidden="true"></span>' : ''}
     ${img}
     <div class="info">
       <div class="title">${esc(titleCase(o.title))}</div>
       ${o.desc ? `<div class="desc">${esc(o.desc)}</div>` : ''}
       <div class="meta"><span class="chain" style="--c:${esc(chainColor(o.chainId, o.color))}">${esc(o.chain)}</span><span>${validText(o)}</span></div>
       ${fit >= FIT_MIN && because ? `<div class="why">${whyText(because, via)}</div>` : ''}
+      ${best ? '<span class="best-tag">Beste tilbud</span>' : ''}
     </div>
     <div class="priceblock">
       <span class="price">${kr(o.price)}</span>
@@ -407,7 +426,7 @@ function renderChips() {
     `<button class="chip" type="button" data-cat="" aria-pressed="${!state.cat}">Alle varer</button>` +
     state.categories
       .filter((c) => counts.get(c.id) && !(food && NON_FOOD.has(c.id) && state.cat !== c.id))
-      .map((c) => `<button class="chip" type="button" data-cat="${esc(c.id)}" aria-pressed="${state.cat === c.id}"><span class="dot" style="--c:${esc(c.color)}"></span>${esc(c.name)}</button>`)
+      .map((c) => `<button class="chip" type="button" data-cat="${esc(c.id)}" aria-pressed="${state.cat === c.id}"><span class="dot" style="--c:${esc(catColor(c))}"></span>${esc(c.name)}</button>`)
       .join('');
   $('#chain-chips').hidden = $('#cat-chips').hidden = !d;
 }
@@ -435,7 +454,10 @@ function renderOffers() {
   $('#for-deg').hidden = !feat.length;
   $('#for-deg-list').innerHTML = feat.map(featCard).join('');
   $('#offer-count').textContent = `${list.length} tilbud${state.q ? ` for «${state.q}»` : ''}`;
-  listEl.innerHTML = list.slice(0, state.shown).map(offerCard).join('');
+  const best = bestOfferIds(list, discount);
+  listEl.innerHTML = list.slice(0, state.shown).map((x) => offerCard(x, best.has(x.o.id))).join('');
+  enableTilt(listEl);
+  shineBestOffers(listEl);
   more.hidden = list.length <= state.shown;
   more.textContent = `Vis flere (${list.length - state.shown} til)`;
   empty.hidden = list.length > 0;
@@ -616,7 +638,7 @@ function renderList() {
   let html = '';
   for (const [cid, items] of sorted) {
     const c = catById(cid);
-    html += `<li class="group-h"><span class="dot" style="--c:${esc(c ? c.color : 'var(--text-3)')}"></span>${esc(c ? c.name : 'Annet')}</li>`;
+    html += `<li class="group-h"><span class="dot" style="--c:${esc(c ? catColor(c) : 'var(--text-3)')}"></span>${esc(c ? c.name : 'Annet')}</li>`;
     html += items.map((i) => itemRow(i, infos.get(i.id))).join('');
   }
   if (done.length) {
@@ -757,8 +779,7 @@ function renderHome() {
   const parts = [];
   const sc = startCard();
   if (sc) parts.push(sc);
-  const saved = savedThisMonth();
-  const savedHTML = saved > 0 ? `<p class="saved">Spart på tilbud i ${esc(monthFmt.format(new Date()).split(' ')[0])}: <b>${krShort(saved)}</b></p>` : '';
+  parts.push(saveCard());
   // Spending overview → Forbruk
   if (!state.receipts.length) {
     parts.push(`<a class="card home-card" href="#forbruk" data-gototab="forbruk" id="home-spend">
@@ -782,10 +803,10 @@ function renderHome() {
     parts.push(`<a class="card home-card" href="#forbruk" data-gototab="forbruk" id="home-spend">
       <div class="home-head"><div><h2>Brukt totalt i ${esc(monthFmt.format(monthDate(c.thisKey)).split(' ')[0])}</h2>
         <p class="hero">${krShort(c.now)}</p><p class="hero-sub">${cmp}</p></div>${miniTrend(sum.months, c.thisKey)}</div>
-      ${budgetHTML(foodSpend(sum.months.get(c.thisKey)))}${savedHTML}
+      ${budgetHTML(foodSpend(sum.months.get(c.thisKey)))}
       ${rows.length ? `<p class="home-label">${focus === c.thisKey ? 'Mest brukt på' : `Mest brukt på i ${esc(monthFmt.format(monthDate(focus)).split(' ')[0])}`}</p>
       <ul class="bars">${rows.map(([id, v]) => { const cat = catById(id); return `<li><div class="row"><span>${esc(cat ? cat.name : 'Ukategorisert')}</span><span>${krShort(v)}</span></div>
-        <div class="track"><div class="fill${cat ? '' : ' uncat'}" style="width:${((v / max) * 100).toFixed(1)}%;--c:${esc(cat ? cat.color : '')}"></div></div></li>`; }).join('')}</ul>` : ''}
+        <div class="track"><div class="fill${cat ? '' : ' uncat'}" style="width:${((v / max) * 100).toFixed(1)}%;--c:${esc(catColor(cat))}"></div></div></li>`; }).join('')}</ul>` : ''}
       <span class="home-more">Se alt forbruk</span></a>`);
     if (!state.settings.budget) parts.push('<button type="button" class="home-link" data-morego="budsjett">Sett et månedsbudsjett</button>');
   }
@@ -805,6 +826,100 @@ function renderHome() {
         <span class="why">Du kjøper ${esc(because.name.toLowerCase())}</span></a></li>`).join('')}</ul>${WHY_FOR_YOU}</section>`);
   }
   body.innerHTML = parts.join('');
+  initMeter(body.querySelector('#home-save'));
+}
+
+/* ---------- Hjem: the savings meter (DESIGN.md v0.7 § 3b) ---------- */
+let meterShownP = null; // last fill shown this session (null = first view: fill from 0)
+const meterPulsed = new Set(); // months whose "goal reached" pulse has played
+const goalText = (g) => `av ${krShort(g)} mål denne måneden`;
+function saveCard() {
+  const saved = savedThisMonth();
+  const goal = state.settings.saveGoal || 500;
+  const month = todayISO().slice(0, 7);
+  const items = state.savings.filter((x) => { const d = new Date(x.at); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` === month; });
+  return `<section class="card save-card" id="home-save" aria-labelledby="save-h">
+    <h2 id="save-h" class="sr-only">Spart denne måneden</h2>
+    <p class="save-num"><span class="save-v">${krShort(saved)}</span> spart</p>
+    <p class="save-sub">${goalText(goal)}</p>
+    <div class="save-row">
+      <div class="meter" role="meter" aria-label="Spart denne måneden" aria-valuemin="0" aria-valuemax="${Math.max(goal, Math.round(saved))}" aria-valuenow="${Math.round(saved)}"
+        aria-valuetext="${krWords(saved)} spart av et mål på ${krWords(goal)}" style="--p:${meterFraction(saved, goal)};--pf:${meterFraction(saved, goal)}">
+        <div class="meter-glow"></div><div class="meter-fill"></div><div class="meter-cap"></div>
+      </div>
+      <span class="save-handle" role="slider" tabindex="0" aria-label="Sparemål" aria-valuemin="50" aria-valuemax="20000" aria-valuenow="${goal}" aria-valuetext="${krWords(goal)}"></span>
+    </div>
+    <button type="button" class="linkish save-what" aria-expanded="false" aria-controls="save-list">${items.length ? 'Hva har jeg spart på?' : 'Hvordan regnes dette?'}</button>
+    <ul id="save-list" class="save-list" hidden>${items.length ? items.map((x) => `<li><span>${esc(x.text)}</span><b>${krShort(x.kr)}</b></li>`).join('') : '<li class="hint">Kryss av varer du har lagt i listen fra et tilbud, så regnes det du sparer mot vanlig pris. Dra i staven for å endre målet.</li>'}</ul>
+  </section>`;
+}
+function initMeter(card) {
+  if (!card) return;
+  const meter = card.querySelector('.meter');
+  const handle = card.querySelector('.save-handle');
+  const sub = card.querySelector('.save-sub');
+  const saved = savedThisMonth();
+  const reduce = reducedMotion();
+  const p = meterFraction(saved, state.settings.saveGoal || 500);
+  const setP = (v) => meter.style.setProperty('--p', v);
+  if (!reduce) {
+    meter.classList.add(meterShownP == null ? 'first' : 'update');
+    setP(meterShownP ?? 0);
+    meter.getBoundingClientRect();
+    requestAnimationFrame(() => setP(p));
+  }
+  meterShownP = p;
+  const month = todayISO().slice(0, 7);
+  if (p >= 1 && !meterPulsed.has(month)) { meterPulsed.add(month); if (!reduce) meter.classList.add('pulse'); }
+
+  const setGoal = (g, persist) => {
+    state.settings.saveGoal = g;
+    sub.textContent = goalText(g);
+    handle.setAttribute('aria-valuenow', g);
+    handle.setAttribute('aria-valuetext', krWords(g));
+    meter.setAttribute('aria-valuemax', Math.max(g, Math.round(saved)));
+    meter.setAttribute('aria-valuetext', `${krWords(saved)} spart av et mål på ${krWords(g)}`);
+    meterShownP = meterFraction(saved, g);
+    setP(meterShownP);
+    meter.style.setProperty('--pf', meterShownP);
+    if (persist) save.settings();
+  };
+  const toggleList = () => {
+    const b = card.querySelector('.save-what');
+    const open = b.getAttribute('aria-expanded') !== 'true';
+    b.setAttribute('aria-expanded', String(open));
+    card.querySelector('#save-list').hidden = !open;
+  };
+  card.querySelector('.save-what').addEventListener('click', toggleList);
+  handle.addEventListener('keydown', (e) => {
+    const step = { ArrowRight: 50, ArrowUp: 50, ArrowLeft: -50, ArrowDown: -50 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    setGoal(Math.min(20000, Math.max(50, (state.settings.saveGoal || 500) + step)), true);
+  });
+  const row = card.querySelector('.save-row');
+  let drag = null;
+  row.addEventListener('pointerdown', (e) => { drag = { x0: e.clientX, y0: e.clientY, id: e.pointerId, g0: state.settings.saveGoal || 500, on: false }; });
+  row.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.x0;
+    const dy = e.clientY - drag.y0;
+    if (!drag.on) {
+      if (Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx)) { drag = null; return; }
+      if (Math.abs(dx) < 6) return;
+      drag.on = true;
+      meter.classList.add('dragging');
+      try { row.setPointerCapture(e.pointerId); } catch { /* synthetic events */ }
+    }
+    const g = goalAfterDrag(drag.g0, dx);
+    if (g !== state.settings.saveGoal) setGoal(g, false);
+  });
+  row.addEventListener('pointerup', () => {
+    if (!drag) return;
+    if (drag.on) { meter.classList.remove('dragging'); save.settings(); } else toggleList();
+    drag = null;
+  });
+  row.addEventListener('pointercancel', () => { if (drag && drag.on) { meter.classList.remove('dragging'); save.settings(); } drag = null; });
 }
 /** "1 vare", "2 varer". */
 const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -832,22 +947,14 @@ function renderSpending() {
   const sum = summarize(state.receipts, classify, state.categories);
   const m = sum.months.get(state.month) || { total: 0, count: 0, byCat: new Map() };
   const rows = [...m.byCat.entries()].filter(([, v]) => Math.abs(v) >= 0.5).sort((a, b) => b[1] - a[1]);
-  const max = Math.max(1, ...rows.map(([, v]) => v));
   const uncatAmount = m.byCat.get(UNCAT) || 0;
   const pctCat = m.total ? Math.round(((m.total - uncatAmount) / m.total) * 100) : 0;
 
-  const barRows = rows
-    .map(([id, v]) => {
-      const c = catById(id);
-      const name = c ? c.name : 'Ukategorisert';
-      const pct = m.total ? Math.round((v / m.total) * 100) : 0;
-      return `<li><div class="row"><span>${esc(name)}</span><span>${krShort(v)} · ${pct} %</span></div>
-        <div class="track"><div class="fill${c ? '' : ' uncat'}" style="width:${Math.max(0, (v / max) * 100).toFixed(1)}%;--c:${esc(c ? c.color : '')}"></div></div></li>`;
-    })
-    .join('');
 
-  const monthReceipts = state.receipts.filter((r) => r.date.startsWith(state.month));
-  const uncatMonth = summarize(monthReceipts, classify, state.categories).uncat;
+  const allMonthReceipts = state.receipts.filter((r) => r.date.startsWith(state.month));
+  const rcat = state.receiptCat && rows.some(([id]) => id === state.receiptCat) ? state.receiptCat : null;
+  const monthReceipts = rcat ? allMonthReceipts.filter((r) => (summarize([r], classify, state.categories).months.get(state.month)?.byCat.get(rcat) || 0) >= 0.5) : allMonthReceipts;
+  const uncatMonth = summarize(allMonthReceipts, classify, state.categories).uncat;
 
   body.innerHTML = `
     <div class="card">
@@ -859,15 +966,162 @@ function renderSpending() {
       <p class="hero">${kr(m.total)}</p>
       <p class="hero-sub">${m.count} kvittering${m.count === 1 ? '' : 'er'}${m.count ? ` · ${pctCat} % kategorisert` : ''}</p>
     </div>
-    ${rows.length ? `<div class="card"><h2>Per kategori</h2><ul class="bars">${barRows}</ul></div>` : ''}
+    ${rows.length ? donutCard(m, rows) : ''}
     <div class="card trend"><h2>Siste 12 måneder</h2>${trendSVG(sum.months)}</div>
     ${uncatMonth.length ? `<div class="card"><h2>Ukategorisert <small>· ${count(uncatMonth.length, 'vare', 'varer')}</small></h2>
       <p class="hint">Velg kategori én gang, så lages en regel som gjelder alle like varer fremover.</p>
       <ul class="queue">${uncatMonth.slice(0, 25).map((u, i) => `<li><span class="q-name">${esc(u.name)}<small>${u.count}× · ${kr(u.amount)}</small></span><button class="btn small" type="button" data-uncat="${i}">Velg</button></li>`).join('')}</ul></div>` : ''}
-    <div class="card"><h2>Kvitteringer <small>· ${esc(monthFmt.format(monthDate(state.month)))}</small></h2>
+    <div class="card" id="month-receipts"><h2>Kvitteringer <small>· ${esc(rcat ? catName(rcat) : monthFmt.format(monthDate(state.month)))}</small></h2>
+      ${rcat ? `<p class="hint">Bare kvitteringer med ${esc(catName(rcat).toLowerCase())}. <button type="button" class="linkish" data-receipt-all>Vis alle</button></p>` : ''}
       ${monthReceipts.length ? `<ul class="receipts">${monthReceipts.map((r) => `<li><button type="button" data-receipt="${esc(r.id)}"><span>${esc(r.store || r.chain)}<small>${esc(dayFmt.format(new Date(r.date + 'T12:00')))}${r.lines && r.lines.length ? ` · ${count(r.lines.length, 'vare', 'varer')}` : ''} · ${esc(sourceName(r.source))}</small></span><b>${kr(r.total)}</b></button></li>`).join('')}</ul>` : '<p class="hint">Ingen kvitteringer denne måneden.</p>'}
     </div>`;
   body._uncat = uncatMonth;
+  initDonut(body.querySelector('.donut'), m);
+}
+
+/* ---------- Forbruk: the category donut (DESIGN.md v0.7 § 3a) ---------- */
+const catName = (id) => (catById(id) ? catById(id).name : 'Ukategorisert');
+const krWords = (v) => `${Math.round(v).toLocaleString('nb-NO')} kroner`;
+let donutPrev = null; // {month, arcs: Map(catId → {len, start})}: where the arcs were, for the morph
+let donutDrawn = false; // the draw-in plays once per session
+function donutCard(m, rows) {
+  const lay = arcLayout(rows.map(([, v]) => v));
+  const monthName = titleCaseFirst(monthFmt.format(monthDate(state.month)).split(' ')[0]);
+  const arcs = rows.map(([id, v], i) => {
+    const c = catById(id);
+    const pct = m.total ? Math.round((v / m.total) * 100) : 0;
+    const d = dash(lay[i]);
+    const circ = (cls) => `<circle class="${cls}" cx="100" cy="100" r="${DONUT.R}" stroke-dasharray="${d.array}" stroke-dashoffset="${d.offset}" transform="rotate(-90 100 100)"/>`;
+    return `<g class="arc" role="button" tabindex="0" aria-pressed="false" data-arc="${i}" data-cat="${esc(id)}" data-len="${lay[i].len}" data-start="${lay[i].start}"
+      aria-label="${esc(catName(id))}: ${esc(krWords(v))}, ${pct} prosent" style="--c:${esc(c ? catColor(c) : 'var(--text-3)')}">${circ('arc-hit')}${circ('arc-vis')}</g>`;
+  }).join('');
+  const legend = rows.map(([id, v], i) => {
+    const c = catById(id);
+    const pct = m.total ? Math.round((v / m.total) * 100) : 0;
+    return `<li><button type="button" class="legend-row" data-arc="${i}" aria-pressed="false"><span class="dot" style="--c:${esc(c ? catColor(c) : 'var(--text-3)')}"></span><span class="ln">${esc(catName(id))}</span><span class="lv">${krShort(v)} · ${pct} %</span></button></li>`;
+  }).join('');
+  return `<div class="card donut-card"><h2>Per kategori</h2>
+    <div class="donut-wrap">
+      <svg class="donut" viewBox="0 0 200 200" role="group" aria-label="Forbruk ${esc(monthName.toLowerCase())}: ${esc(krWords(m.total))} fordelt på ${count(rows.length, 'kategori', 'kategorier')}">
+        <circle class="donut-track" cx="100" cy="100" r="${DONUT.R}"/>
+        <circle class="donut-glow" cx="100" cy="100" r="${DONUT.R}" transform="rotate(-90 100 100)" stroke-dasharray="0 ${DONUT.C}"/>
+        ${arcs}
+      </svg>
+      <div class="donut-center" aria-hidden="true"><span class="dc-label">Totalt</span><span class="dc-value">${krShort(m.total)}</span><span class="dc-sub">${count(m.count, 'kvittering', 'kvitteringer')}</span></div>
+    </div>
+    <div class="donut-actions" hidden><button type="button" class="btn small" data-donut-receipts>Se kvitteringer</button></div>
+    <ul class="legend">${legend}</ul></div>`;
+}
+
+function initDonut(svg, m) {
+  const reduce = reducedMotion();
+  if (!svg) { donutPrev = null; return; }
+  const arcs = [...svg.querySelectorAll('.arc')];
+  const card = svg.closest('.donut-card');
+  const center = card.querySelector('.donut-center');
+  const glow = svg.querySelector('.donut-glow');
+  const lay = arcs.map((g) => ({ len: Number(g.dataset.len), start: Number(g.dataset.start), frac: 0 }));
+  lay.forEach((l, i) => { l.frac = (i + 1 < lay.length ? lay[i + 1].start : 1) - l.start; });
+  const monthChanged = donutPrev && donutPrev.month !== state.month;
+  if (monthChanged) { const live = $('#sr-live'); if (live) live.textContent = `${titleCaseFirst(monthFmt.format(monthDate(state.month)).split(' ')[0])}: ${krWords(m.total)}`; }
+
+  // Morph (month change) or draw in (first time this session): start from the old arcs, then set the new ones.
+  if (!reduce) {
+    const from = (g, i) => {
+      if (!donutDrawn) return { len: 0, start: lay[i].start };
+      const p = donutPrev && donutPrev.arcs.get(g.dataset.cat);
+      return p || { len: 0, start: lay[i].start };
+    };
+    const vis = arcs.map((g) => g.querySelector('.arc-vis'));
+    vis.forEach((c, i) => { const d = dash(from(arcs[i], i)); c.setAttribute('stroke-dasharray', d.array); c.setAttribute('stroke-dashoffset', d.offset); });
+    svg.classList.add(donutDrawn ? 'morph' : 'draw');
+    if (!donutDrawn) vis.forEach((c, i) => { c.style.transitionDelay = `${i * 30}ms`; });
+    svg.getBoundingClientRect();
+    requestAnimationFrame(() => vis.forEach((c, i) => { const d = dash(lay[i]); c.setAttribute('stroke-dasharray', d.array); c.setAttribute('stroke-dashoffset', d.offset); }));
+  } else if (monthChanged) svg.closest('.donut-wrap').classList.add('fade');
+  donutDrawn = true;
+  donutPrev = { month: state.month, arcs: new Map(arcs.map((g, i) => [g.dataset.cat, lay[i]])) };
+
+  const select = (i, { buzz = false } = {}) => {
+    const cur = arcs.findIndex((g) => g.classList.contains('sel'));
+    if (i === cur) return;
+    if (buzz && i >= 0) haptic(8);
+    arcs.forEach((g, k) => { g.classList.toggle('sel', k === i); g.setAttribute('aria-pressed', String(k === i)); });
+    svg.classList.toggle('has-sel', i >= 0);
+    card.querySelectorAll('.legend-row').forEach((b) => b.setAttribute('aria-pressed', String(Number(b.dataset.arc) === i)));
+    state.donutSel = i >= 0 ? arcs[i].dataset.cat : null;
+    if (i >= 0) {
+      const d = dash(lay[i]);
+      glow.setAttribute('stroke-dasharray', d.array);
+      glow.setAttribute('stroke-dashoffset', d.offset);
+      glow.style.setProperty('--c', arcs[i].style.getPropertyValue('--c'));
+    } else glow.setAttribute('stroke-dasharray', `0 ${DONUT.C}`);
+    const [label, value, sub] = center.children;
+    if (i >= 0) {
+      const v = m.byCat.get(arcs[i].dataset.cat) || 0;
+      label.textContent = catName(arcs[i].dataset.cat);
+      value.textContent = krShort(v);
+      sub.textContent = `${m.total ? Math.round((v / m.total) * 100) : 0} % av måneden`;
+    } else {
+      label.textContent = 'Totalt';
+      value.textContent = krShort(m.total);
+      sub.textContent = count(m.count, 'kvittering', 'kvitteringer');
+    }
+    center.classList.remove('swap'); center.getBoundingClientRect(); center.classList.add('swap');
+    card.querySelector('.donut-actions').hidden = i < 0;
+    if (i >= 0) card.querySelector('[data-donut-receipts]').textContent = `Se kvitteringer med ${catName(arcs[i].dataset.cat).toLowerCase()}`;
+  };
+  const keep = arcs.findIndex((g) => g.dataset.cat === state.donutSel);
+  if (keep >= 0) select(keep);
+
+  card.addEventListener('click', (e) => {
+    const lr = e.target.closest('.legend-row');
+    if (lr) { const i = Number(lr.dataset.arc); select(arcs[i].classList.contains('sel') ? -1 : i); return; }
+    if (e.target.closest('[data-donut-receipts]')) {
+      state.receiptCat = state.donutSel;
+      renderSpending();
+      $('#month-receipts')?.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
+    }
+  });
+  let drag = null;
+  svg.addEventListener('pointerdown', (e) => {
+    const r = svg.getBoundingClientRect(); // cached for the whole drag
+    drag = { x0: e.clientX, y0: e.clientY, r, id: e.pointerId, on: false };
+  });
+  svg.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.x0;
+    const dy = e.clientY - drag.y0;
+    if (!drag.on) {
+      if (Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx)) { drag = null; return; }
+      if (Math.abs(dx) < 6) return;
+      drag.on = true;
+      try { svg.setPointerCapture(e.pointerId); } catch { /* synthetic events */ }
+    }
+    const x = ((e.clientX - drag.r.left) / drag.r.width) * 200;
+    const y = ((e.clientY - drag.r.top) / drag.r.height) * 200;
+    const i = arcAt(lay, x, y);
+    if (i >= 0) requestAnimationFrame(() => select(i, { buzz: true }));
+  });
+  const stop = (e) => { if (drag && drag.on) { drag.dragged = true; svg._justDragged = true; setTimeout(() => { svg._justDragged = false; }, 0); } drag = null; };
+  svg.addEventListener('pointerup', stop);
+  svg.addEventListener('pointercancel', () => { drag = null; });
+  svg.addEventListener('click', (e) => {
+    if (svg._justDragged) return;
+    const g = e.target.closest('.arc');
+    if (!g) { select(-1); return; }
+    const i = Number(g.dataset.arc);
+    select(g.classList.contains('sel') ? -1 : i);
+  });
+  svg.addEventListener('keydown', (e) => {
+    const g = e.target.closest('.arc');
+    if (!g) return;
+    const i = Number(g.dataset.arc);
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); const n = (i + 1) % arcs.length; arcs[n].focus(); select(n); }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); const n = (i - 1 + arcs.length) % arcs.length; arcs[n].focus(); select(n); }
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(g.classList.contains('sel') ? -1 : i); }
+    else if (e.key === 'Escape') select(-1);
+  });
 }
 
 const sourceName = (s) => ({ trumf: 'Trumf', rema: 'REMA', coop: 'Coop', manual: 'manuell', import: 'import', claude: 'kvitteringsfoto' }[s] || s);
@@ -926,7 +1180,7 @@ function openRuleDialog(target) {
   f.useEan.checked = false;
   $('#rule-cats').innerHTML =
     '<legend class="sr-only">Kategori</legend>' +
-    state.categories.map((c) => `<button type="button" data-pick="${esc(c.id)}"><span class="dot" style="--c:${esc(c.color)}"></span>${esc(c.name)}</button>`).join('');
+    state.categories.map((c) => `<button type="button" data-pick="${esc(c.id)}"><span class="dot" style="--c:${esc(catColor(c))}"></span>${esc(c.name)}</button>`).join('');
   dlg.showModal();
   if (document.activeElement) document.activeElement.blur(); // don't pop up the iOS keyboard
 }
@@ -957,7 +1211,7 @@ function openDetail(id) {
       const cid = (l.category && valid.has(l.category) && l.category) || classify(l.name, l.ean, l.group);
       const c = cid && catById(cid);
       return `<li><span>${esc(l.name)}${l.qty && l.qty !== 1 ? ` <small>× ${esc(String(l.qty).replace('.', ','))}</small>` : ''}</span><b>${kr(l.amount)}</b>
-        <button type="button" data-line="${i}"><span class="dot" style="--c:${esc(c ? c.color : 'transparent')};${c ? '' : 'border:1px dashed currentColor'}"></span>${esc(c ? c.name : 'Ukategorisert – velg')}</button></li>`;
+        <button type="button" data-line="${i}"><span class="dot" style="--c:${esc(c ? catColor(c) : 'transparent')};${c ? '' : 'border:1px dashed currentColor'}"></span>${esc(c ? c.name : 'Ukategorisert – velg')}</button></li>`;
     })
     .join('');
   $('#detail-body').innerHTML = `
@@ -1197,6 +1451,7 @@ const ICONS = {
   avansert: '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
   om: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/>',
   tekst: '<path d="M4 18 9 6l5 12M5.8 14h6.4M15 18l3-7 3 7M15.8 16h4.4"/>',
+  tema: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
   mat: '<path d="M7 3v8a2 2 0 0 0 4 0V3M9 13v8M17 21V3c-2 1-3 4-3 7s1 3 3 3"/>',
 };
 const icon = (k) => `<span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24">${ICONS[k]}</svg></span>`;
@@ -1227,7 +1482,9 @@ function moreRoot() {
       <button type="button" class="linkish" data-morepage="personvern">Les mer, ta sikkerhetskopi eller slett</button></div>
     <ul class="settings">${row('omrade', 'Område', area().name)}${row('kjeder', 'Kjeder', known.length ? `${shown} av ${known.length}` : '')}${row('budsjett', 'Budsjett', state.settings.budget ? `${krShort(state.settings.budget)} i måneden` : 'Ikke satt')}</ul>
     <ul class="settings">${row('kvitteringer', 'Kvitteringer', String(state.receipts.length))}${row('kategorier', 'Kategorier', String(state.categories.length))}</ul>
-    <ul class="settings">${toggleRow('bigText', 'tekst', 'Større tekst', 'Gjør all tekst i appen større')}${toggleRow('foodOnly', 'mat', 'Kun mat i tilbudene', 'Skjuler blomster, klær, dyremat og husholdning')}</ul>
+    <ul class="settings"><li><label class="set-row">${icon('tema')}<span class="lbl">Tema</span>
+      <select class="set-select" data-theme-select>${[['auto', 'Som telefonen'], ['dark', 'Mørkt'], ['light', 'Lyst']].map(([v, l]) => `<option value="${v}"${(state.settings.theme || 'auto') === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label></li>
+      ${toggleRow('bigText', 'tekst', 'Større tekst', 'Gjør all tekst i appen større')}${toggleRow('foodOnly', 'mat', 'Kun mat i tilbudene', 'Skjuler blomster, klær, dyremat og husholdning')}</ul>
     <ul class="settings">${cloud ? row('konto', 'Konto', cloud.user ? 'Logget inn' : 'Valgfritt') : ''}${row('personvern', 'Personvern og sletting')}${row('avansert', 'Avansert (for viderekomne)')}${row('om', 'Om Matkassa', APP_VERSION)}</ul>`;
 }
 
@@ -1904,7 +2161,8 @@ function bind() {
 
   $('#view-forbruk').addEventListener('click', (e) => {
     const mb = e.target.closest('[data-month]');
-    if (mb) { state.month = shiftMonth(state.month, Number(mb.dataset.month)); renderSpending(); return; }
+    if (mb) { state.month = shiftMonth(state.month, Number(mb.dataset.month)); state.receiptCat = null; renderSpending(); return; }
+    if (e.target.closest('[data-receipt-all]')) { state.receiptCat = null; renderSpending(); return; }
     const g = e.target.closest('[data-goto]');
     if (g) { state.month = g.dataset.goto; renderSpending(); return; }
     const u = e.target.closest('[data-uncat]');
@@ -1957,6 +2215,7 @@ function bind() {
   });
   $('#view-mer').addEventListener('change', (e) => {
     const t = e.target;
+    if (t.matches('[data-theme-select]')) { state.settings.theme = t.value; save.settings(); applyTheme(); return; }
     if (t.dataset.setting) {
       state.settings[t.dataset.setting] = t.checked;
       save.settings();

@@ -1,9 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#14402b"/><stop offset="1" stop-color="#07170f"/></linearGradient></defs>
+  <defs><radialGradient id="g" cx="50%" cy="54%" r="50%"><stop offset="0" stop-color="#0c3038"/><stop offset="1" stop-color="#05070a"/></radialGradient></defs>
+  <rect width="512" height="512" fill="#05070a"/>
   <rect width="512" height="512" fill="url(#g)"/>
-  <path d="M120 200h272l-26 196a24 24 0 0 1-24 21H170a24 24 0 0 1-24-21z" fill="#f2f2ef"/>
-  <path d="M184 200l46-92M328 200l-46-92" stroke="#f2f2ef" stroke-width="26" stroke-linecap="round" fill="none"/>
-  <path d="M206 262v100M256 262v100M306 262v100" stroke="#14402b" stroke-width="20" stroke-linecap="round"/>
-  <circle cx="392" cy="150" r="58" fill="#e8c46a"/>
-  <path d="M392 118v64M360 150h64" stroke="#14402b" stroke-width="18" stroke-linecap="round"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M150 214h212l-22 150a22 22 0 0 1-22 19H194a22 22 0 0 1-22-19z" stroke="#7ff3ff" stroke-width="30"/>
+    <path d="M150 214h212l-22 150a22 22 0 0 1-22 19H194a22 22 0 0 1-22-19z" stroke="#00e5ff" stroke-width="24"/>
+    <path d="M200 214l38-76M312 214l-38-76" stroke="#00e5ff" stroke-width="22"/>
+    <path d="M216 266v66M256 266v66M296 266v66" stroke="#00e5ff" stroke-width="16"/>
+  </g>
+  <circle cx="352" cy="158" r="26" fill="#ff9a55"/>
 </svg>

@@ -453,6 +453,7 @@ async function chainTests() {
     await send('Network.setUserAgentOverride', { userAgent: MAC_UA, platform: 'MacIntel' }, S);
     await send('Emulation.setTouchEmulationEnabled', { enabled: false }, S);
     await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: false }, S);
+    await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] }, S);
     helperState.installed = false;
     helperState.requests.length = 0;
     await navigate(BASE + 'index.html#mer');
@@ -524,6 +525,136 @@ async function chainTests() {
     await sleep(300);
     check(!helperState.requests.length, 'rema on a phone: the app never calls the Mac helper', helperState.requests.length);
     await stateShot('rema-7-telefon');
+  });
+}
+
+
+/* ---------- v0.7 Neon: the three figures, themes, reduced motion, screenshots (all data FAKE) ---------- */
+const media = (scheme, motion = 'no-preference') => send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }, { name: 'prefers-reduced-motion', value: motion }] }, S);
+async function v07Shot(name) {
+  await evaluate(`window.scrollTo(0, 0); await new Promise(r => setTimeout(r, 120)); return true;`);
+  await shot(name);
+  fs.mkdirSync(V07, { recursive: true });
+  fs.copyFileSync(path.join(SHOTS, `${name}.png`), path.join(V07, `${name}.png`));
+}
+const ptr = (sel, type, x, y, idx = 0) => evaluate(`const el = document.querySelectorAll(${JSON.stringify(sel)})[${idx}]; const r = el.getBoundingClientRect();
+  el.dispatchEvent(new PointerEvent(${JSON.stringify(type)}, { bubbles: true, pointerId: 7, pointerType: 'touch', isPrimary: true, clientX: r.left + ${x}, clientY: r.top + ${y} })); return true;`);
+const scaleX = (sel) => evaluate(`const t = getComputedStyle(document.querySelector(${JSON.stringify(sel)})).transform; const m = /matrix\\(([^,]+)/.exec(t); return m ? Number(m[1]) : (t === 'none' ? 1 : NaN);`);
+async function neonTests() {
+  await inFreshContext('neon', async () => {
+    await media('dark');
+    await navigate(BASE + 'index.html#hjem');
+    await waitFor(`document.querySelector('#home-body') && document.querySelector('#home-body').children.length`);
+    await evaluate(`const db = await new Promise((r) => { const q = indexedDB.open('${APP_DB}'); q.onsuccess = () => r(q.result); });
+      await new Promise((r) => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put([{ id: 'save-FAKE-1', at: Date.now(), kr: 212, text: 'TINE HELMELK (FAKE)' }, { id: 'save-FAKE-2', at: Date.now(), kr: 100, text: 'KYLLINGFILET (FAKE)' }], 'savings'); t.oncomplete = r; });
+      return true;`);
+    await tab('forbruk');
+    await importFixture(path.join(FAKE, 'spending-FAKE.json'));
+    await navigate(BASE + 'index.html#hjem');
+    check(await waitFor(`document.querySelector('#home-save .meter')`, 10000), 'neon: Hjem shows the savings meter');
+    check(await evaluate(`const m = document.querySelector('#home-save [role="meter"]'); return m.getAttribute('aria-valuenow') === '312' && m.getAttribute('aria-valuemax') === '500' && /312 kroner spart av et mål på 500 kroner/.test(m.getAttribute('aria-valuetext'));`), 'neon meter: role=meter with value, max and a spoken text');
+    await sleep(900);
+    const fill = await scaleX('#home-save .meter-fill');
+    check(Math.abs(fill - 0.624) < 0.01, 'neon meter: the fill grows to 312/500 (scaleX, not width)', fill);
+    check(await evaluate(`return getComputedStyle(document.querySelector('.meter-glow')).boxShadow !== 'none';`), 'neon meter: sale glow in dark');
+    await click('#home-save .save-what');
+    check(await evaluate(`return !document.querySelector('#save-list').hidden && /TINE HELMELK/.test(document.querySelector('#save-list').textContent);`), 'neon meter: tapping shows what the savings are made of');
+    await click('#home-save .save-what');
+    await ptr('#home-save .save-row', 'pointerdown', 40, 20);
+    await ptr('#home-save .save-row', 'pointermove', 60, 21);
+    await ptr('#home-save .save-row', 'pointermove', 80, 21);
+    await ptr('#home-save .save-row', 'pointerup', 80, 21);
+    await sleep(300);
+    const g = await evaluate(`return document.querySelector('#home-save .save-sub').textContent;`);
+    check(/650 kr/.test(g) && (await readSettings()).saveGoal === 650, 'neon meter: dragging the bar sets the goal in 50 kr steps and saves it', g);
+    for (let i = 0; i < 3; i++) await evaluate(`document.querySelector('.save-handle').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); return true;`);
+    check(await evaluate(`return document.querySelector('.save-handle').getAttribute('aria-valuenow') === '500';`), 'neon meter: the goal slider works with arrow keys');
+    await sleep(300);
+    await v07Shot('neon-dark-hjem');
+
+    await tab('forbruk');
+    check(await waitFor(`document.querySelectorAll('#spend-body .donut .arc').length >= 2`), 'neon donut: Forbruk shows the category donut');
+    const a11y = await evaluate(`const s = document.querySelector('.donut'); const a = s.querySelector('.arc'); return { role: s.getAttribute('role'), label: s.getAttribute('aria-label'), arcRole: a.getAttribute('role'), tab: a.getAttribute('tabindex'), arcLabel: a.getAttribute('aria-label') };`);
+    check(a11y.role === 'group' && /kroner fordelt på \d+ kategori/.test(a11y.label) && a11y.arcRole === 'button' && a11y.tab === '0' && /kroner, \d+ prosent/.test(a11y.arcLabel), 'neon donut: group + arcs as buttons with spoken amounts', JSON.stringify(a11y));
+    await sleep(900);
+    check(await evaluate(`return [...document.querySelectorAll('.donut .arc')].every((g) => { const v = g.querySelector('.arc-vis'); return Math.abs(parseFloat(v.getAttribute('stroke-dasharray')) - Number(g.dataset.len)) < 0.05; });`), 'neon donut: the arcs draw in to their real share');
+    await evaluate(`document.querySelectorAll('.donut .arc')[1].dispatchEvent(new MouseEvent('click', { bubbles: true })); return true;`);
+    await sleep(400);
+    const sel = await evaluate(`const g = document.querySelectorAll('.donut .arc')[1]; return { pressed: g.getAttribute('aria-pressed'), center: document.querySelector('.dc-label').textContent, legend: document.querySelectorAll('.legend-row')[1].getAttribute('aria-pressed'), dim: getComputedStyle(document.querySelectorAll('.donut .arc')[0]).opacity, receipts: !document.querySelector('.donut-actions').hidden };`);
+    check(sel.pressed === 'true' && sel.center !== 'Totalt' && sel.legend === 'true' && Number(sel.dim) < 0.5 && sel.receipts, 'neon donut: tapping an arc selects it (centre, legend, others dimmed, "Se kvitteringer")', JSON.stringify(sel));
+    await evaluate(`document.querySelectorAll('.donut .arc')[1].dispatchEvent(new MouseEvent('click', { bubbles: true })); return true;`);
+    check(await evaluate(`return document.querySelector('.dc-label').textContent === 'Totalt' && !document.querySelector('.donut .arc.sel');`), 'neon donut: tapping it again clears the choice');
+    // drag around the ring: 6 px sideways starts scrubbing; the arc under the finger is chosen
+    await ptr('.donut', 'pointerdown', 130, 20);
+    await ptr('.donut', 'pointermove', 140, 22);
+    await ptr('.donut', 'pointermove', 236, 130);
+    await sleep(100);
+    await ptr('.donut', 'pointerup', 236, 130);
+    check(await evaluate(`return !!document.querySelector('.donut .arc.sel');`), 'neon donut: dragging around the ring picks the arc under the finger');
+    await evaluate(`const a = document.querySelector('.donut .arc'); a.focus(); a.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return true;`);
+    await click('[data-month="-1"]');
+    check(await evaluate(`return /:/.test(document.querySelector('#sr-live').textContent) && /kroner/.test(document.querySelector('#sr-live').textContent);`), 'neon donut: a month change is announced (aria-live)', await evaluate(`return document.querySelector('#sr-live').textContent;`));
+    await click('[data-month="1"]');
+    check(await evaluate(`return document.querySelector('.donut').classList.contains('morph');`), 'neon donut: switching month morphs the arcs');
+    await sleep(700);
+    await v07Shot('neon-dark-forbruk');
+
+    await tab('tilbud');
+    await waitFor(`document.querySelectorAll('#offer-list .offer').length > 0`);
+    const best = await evaluate(`return [...document.querySelectorAll('#offer-list .offer.best')].map((c) => ({ tag: !!c.querySelector('.best-tag'), label: c.getAttribute('aria-label') || '' }));`);
+    fixtureCheck(best.length > 0 && best.length <= 3 && best.every((b) => b.tag && /beste tilbud/.test(b.label)), 'neon tilbud: at most 3 best offers, with a visible "Beste tilbud" and a spoken label', JSON.stringify(best).slice(0, 200));
+    await ptr('#offer-list .offer .info', 'pointerdown', 40, 20);
+    await sleep(160);
+    await ptr('#offer-list .offer .info', 'pointermove', 60, 24);
+    await sleep(60);
+    const tilt = await evaluate(`return document.querySelector('#offer-list .offer').style.transform;`);
+    check(/rotateX/.test(tilt) && /rotateY/.test(tilt), 'neon tilbud: holding and moving a finger tilts the card', tilt);
+    await ptr('#offer-list .offer .info', 'pointerup', 60, 24);
+    check(!(await evaluate(`return document.querySelector('#offer-list .offer').style.transform;`)), 'neon tilbud: letting go puts the card back');
+    await ptr('#offer-list .offer .info', 'pointerdown', 40, 20, 1);
+    await ptr('#offer-list .offer .info', 'pointermove', 41, 60, 1);
+    await sleep(200);
+    check(!(await evaluate(`return document.querySelectorAll('#offer-list .offer')[1].style.transform;`)), 'neon tilbud: a vertical swipe scrolls and never tilts');
+    await ptr('#offer-list .offer .info', 'pointerup', 41, 60, 1);
+    await sleep(1000);
+    await v07Shot('neon-dark-tilbud');
+    await tab('liste');
+    await v07Shot('neon-dark-liste');
+    await tab('mer');
+    await v07Shot('neon-dark-mer');
+    check(await evaluate(`return getComputedStyle(document.body).backgroundColor;`) === 'rgb(5, 7, 10)', 'neon: dark is the default look');
+
+    // light: prefers-color-scheme light, and Mer → Tema
+    await media('light');
+    await sleep(200);
+    check(await evaluate(`return getComputedStyle(document.body).backgroundColor;`) === 'rgb(241, 244, 247)', 'neon: a light phone gets the light theme');
+    for (const t of ['hjem', 'tilbud', 'liste', 'forbruk', 'mer']) { await tab(t); await sleep(t === 'forbruk' ? 700 : 250); await v07Shot(`neon-lys-${t}`); }
+    await evaluate(`const s = document.querySelector('[data-theme-select]'); s.value = 'dark'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
+    check(await evaluate(`return document.documentElement.dataset.theme === 'dark' && getComputedStyle(document.body).backgroundColor === 'rgb(5, 7, 10)';`) && (await readSettings()).theme === 'dark', 'neon: Mer → Tema → Mørkt wins over a light phone, and is saved');
+    await evaluate(`const s = document.querySelector('[data-theme-select]'); s.value = 'auto'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
+    check(await evaluate(`return !document.documentElement.dataset.theme;`), 'neon: Tema → Som telefonen follows the phone again');
+    await a11yAudit('neon-mer');
+
+    // reduced motion: everything is shown at once, nothing tilts
+    await media('dark', 'reduce');
+    await navigate(BASE + 'index.html#forbruk');
+    await waitFor(`document.querySelectorAll('#spend-body .donut .arc').length >= 2`);
+    check(await evaluate(`return [...document.querySelectorAll('.donut .arc')].every((g) => Math.abs(parseFloat(g.querySelector('.arc-vis').getAttribute('stroke-dasharray')) - Number(g.dataset.len)) < 0.05) && getComputedStyle(document.querySelector('.arc-vis')).transitionDuration === '0s';`), 'reduced motion: the donut shows its final values at once, no transition');
+    await evaluate(`document.querySelectorAll('.donut .arc')[0].dispatchEvent(new MouseEvent('click', { bubbles: true })); return true;`);
+    check(await evaluate(`const g = document.querySelector('.donut .arc.sel'); return !!g && getComputedStyle(g).transform === 'none' && getComputedStyle(document.querySelector('.donut-glow')).opacity === '1';`), 'reduced motion: a chosen arc gets a ring instead of growing');
+    await v07Shot('neon-dark-forbruk-redusert-bevegelse');
+    await tab('hjem');
+    const rf = await scaleX('#home-save .meter-fill');
+    check(Math.abs(rf - 0.624) < 0.01, 'reduced motion: the meter is filled at once', rf);
+    await tab('tilbud');
+    await waitFor(`document.querySelectorAll('#offer-list .offer').length > 0`);
+    await ptr('#offer-list .offer .info', 'pointerdown', 40, 20);
+    await sleep(160);
+    await ptr('#offer-list .offer .info', 'pointermove', 60, 24);
+    await sleep(60);
+    check(!(await evaluate(`return document.querySelector('#offer-list .offer').style.transform;`)), 'reduced motion: offer cards do not tilt');
+    await ptr('#offer-list .offer .info', 'pointerup', 60, 24);
+    fixtureCheck(await evaluate(`const b = document.querySelector('.offer.best'); return !!b && getComputedStyle(b.querySelector('.best-edge')).display === 'none' && !!b.querySelector('.best-tag');`), 'reduced motion: best offers keep the ring and the label, no shine');
   });
 }
 
@@ -979,7 +1110,7 @@ try {
 
   // 8. Forbruk with data
   await tab('forbruk');
-  check(await evaluate(`return document.querySelectorAll('#spend-body .bars li').length > 0 && /kategorisert/.test(document.querySelector('#spend-body .hero-sub').textContent);`), 'forbruk: categories and % categorised');
+  check(await evaluate(`return document.querySelectorAll('#spend-body .legend li').length > 0 && /kategorisert/.test(document.querySelector('#spend-body .hero-sub').textContent);`), 'forbruk: categories and % categorised');
   check(await noHScroll(), 'forbruk: no horizontal scroll');
   await a11yAudit('forbruk');
   await shot('06-forbruk-lys');
@@ -1117,6 +1248,7 @@ try {
 
   await motionTests();
   await chainTests();
+  await neonTests();
 
   // 11. Offline: service worker serves the app shell, data stays
   check(await waitFor(`navigator.serviceWorker && navigator.serviceWorker.controller`, 15000) || (await navigate(BASE + 'index.html#tilbud'), await waitFor(`navigator.serviceWorker.controller`, 15000)), 'service worker controls the page');

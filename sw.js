@@ -3,7 +3,7 @@
 // Cache names are per app: the original Matkassa lives on the same GitHub Pages origin ('matkassa-v*',
 // 'matkassa-img'), so this worker uses its own prefix and only ever deletes its own caches.
 const PREFIX = 'matkassa-premium-v';
-const VERSION = PREFIX + '5';
+const VERSION = PREFIX + '6';
 const SHELL = [
   './',
   'index.html',
@@ -20,12 +20,14 @@ const SHELL = [
   'js/cloud.js',
   'js/cloud-config.js',
   'js/motion.js',
+  'js/figures.js',
   'js/chains/index.js',
   'js/chains/mac-helper.js',
   'js/chains/rema.js',
   'icons/icon.svg',
   'icons/icon-192.png',
   'icons/icon-512.png',
+  'icons/icon-maskable-512.png',
   'icons/apple-touch-icon.png',
 ];
 const IMG_CACHE = 'matkassa-premium-img';
