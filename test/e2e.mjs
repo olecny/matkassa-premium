@@ -59,6 +59,7 @@ const tjekAreas = []; // r_lat,r_lng of every Tjek catalog request, to see which
 
 function fakeResponse(url, headers, method = 'GET', body = '') {
   const u = new URL(url);
+  if (u.host === '127.0.0.1:47321') return fakeHelper(u, headers, method);
   if (u.hostname.endsWith('.supabase.co')) return supa.handle(url, method, headers, body) || { status: 404, type: 'application/json', body: '{}' };
   if (u.hostname === 'squid-api.tjek.com' && u.pathname === '/v2/catalogs' && !Number(u.searchParams.get('offset') || 0)) tjekAreas.push(`${u.searchParams.get('r_lat')},${u.searchParams.get('r_lng')}`);
   if (method === 'OPTIONS' && u.hostname === 'api.github.com') return { status: 204, type: 'text/plain', body: '' }; // CORS preflight
@@ -85,6 +86,32 @@ function fakeResponse(url, headers, method = 'GET', body = '') {
     return { status: 404, type: 'application/json', body: '{"message":"Not Found (fake)"}' };
   }
   return null; // let it through (app shell from the local server; real Tjek in --live)
+}
+
+
+/* ---------- FAKE Mac helper (ingest/helper.py) on 127.0.0.1:47321: same replies, no real REMA ---------- */
+const HELPER_CODE = 'FAKE-PAIR-CODE-0001';
+const helperState = { installed: false, rema: { state: 'disconnected', lastSync: null, lastSyncOk: null, message: null }, syncing: false, pollsLeft: 0, requests: [] };
+function fakeHelper(u, headers, method) {
+  const auth = headers.Authorization || headers.authorization || '';
+  helperState.requests.push({ method, path: u.pathname, auth });
+  if (!helperState.installed) return { status: 0, abort: true };
+  const json = (status, b) => ({ status, type: 'application/json', body: JSON.stringify(b) });
+  if (method === 'OPTIONS') return { status: 204, type: 'text/plain', body: '' };
+  const norm = (c) => c.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (norm(auth.replace(/^Bearer\s+/i, '')) !== norm(HELPER_CODE)) return json(401, { error: 'unpaired', helper: 'matkassa' });
+  const r = helperState.rema;
+  if (method === 'POST' && u.pathname === '/rema/login') { r.state = 'connecting'; helperState.pollsLeft = 2; }
+  else if (method === 'POST' && u.pathname === '/sync') { helperState.syncing = true; helperState.pollsLeft = 1; }
+  else if (method === 'POST' && u.pathname === '/rema/logout') Object.assign(r, { state: 'disconnected', lastSync: null, lastSyncOk: null, message: null });
+  else if (method === 'GET' && u.pathname === '/status') {
+    // The user "logs in" in REMA's window after a couple of polls; a sync takes one poll.
+    if (helperState.pollsLeft > 0 && --helperState.pollsLeft === 0) {
+      if (r.state === 'connecting') r.state = 'connected';
+      else if (helperState.syncing) { helperState.syncing = false; Object.assign(r, { lastSync: new Date().toISOString(), lastSyncOk: true, message: null }); }
+    }
+  } else return json(404, { error: 'not found' });
+  return json(method === 'GET' ? 200 : 202, { helper: 'matkassa', version: 1, rema: { ...r }, syncing: helperState.syncing });
 }
 
 /* ---------- static server for the app ---------- */
@@ -188,6 +215,7 @@ listeners.push(async (msg) => {
     const { requestId, request } = msg.params;
     const fake = fakeResponse(request.url, request.headers || {}, request.method, request.postData || '');
     if (!fake) return send('Fetch.continueRequest', { requestId }, sid).catch(() => {});
+    if (fake.abort) return send('Fetch.failRequest', { requestId, errorReason: 'ConnectionRefused' }, sid).catch(() => {});
     const body = Buffer.isBuffer(fake.body) ? fake.body : Buffer.from(fake.body);
     send('Fetch.fulfillRequest', {
       requestId, responseCode: fake.status,
@@ -409,6 +437,96 @@ async function locationTests() {
 }
 
 /* ---------- premium: same origin as the original Matkassa, nothing shared by accident ---------- */
+
+/* ---------- Koble til REMA (Mer → Kjeder) against the FAKE helper; screenshots of every state ---------- */
+const V07 = path.join(ROOT, 'screenshots', 'v0.7');
+const MAC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+const remaState = () => evaluate(`const el = document.querySelector('#rema-state'); return el ? el.textContent : '';`);
+async function stateShot(name) {
+  await evaluate(`document.querySelector('#chain-connect').scrollIntoView({ block: 'start' }); window.scrollBy(0, -70); await new Promise(r => setTimeout(r, 150)); return true;`);
+  await shot(name);
+  fs.mkdirSync(V07, { recursive: true });
+  fs.copyFileSync(path.join(SHOTS, `${name}.png`), path.join(V07, `${name}.png`));
+}
+async function chainTests() {
+  await inFreshContext('rema-mac', async () => {
+    await send('Network.setUserAgentOverride', { userAgent: MAC_UA, platform: 'MacIntel' }, S);
+    await send('Emulation.setTouchEmulationEnabled', { enabled: false }, S);
+    await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: false }, S);
+    helperState.installed = false;
+    helperState.requests.length = 0;
+    await navigate(BASE + 'index.html#mer');
+    await waitFor(`document.querySelector('[data-morepage="kjeder"]')`);
+    await merPage('kjeder');
+    check(await waitFor(`/Ikke koblet/.test(document.querySelector('#rema-state')?.textContent)`, 8000), 'rema: first visit → "Ikke koblet"', await remaState());
+    await sleep(300);
+    check(!helperState.requests.length, 'rema: nothing is sent to 127.0.0.1 before the user taps "Koble til REMA"', helperState.requests.length);
+    await stateShot('rema-0-ikke-koblet');
+    await click('[data-chainact="login"]');
+    check(await waitFor(`/Hjelper ikke installert/.test(document.querySelector('#rema-state')?.textContent)`, 8000), 'rema: no helper → "Hjelper ikke installert"', await remaState());
+    const guide = await evaluate(`return document.querySelector('#chain-connect').textContent;`);
+    check(/install-helper\.sh/.test(guide) && /Terminal/.test(guide), 'rema: the install guide names Terminal and install-helper.sh');
+    check(await evaluate(`const b = document.querySelector('.chain-badge'); return b && b.textContent.trim() === 'REMA 1000' && !document.querySelector('#chain-connect img');`), 'rema: a REMA 1000 text badge, no logo image');
+    await stateShot('rema-1-hjelper-ikke-installert');
+
+    helperState.installed = true;
+    await click('[data-chainact="refresh"]');
+    check(await waitFor(`/Koble appen til Mac-en/.test(document.querySelector('#rema-state')?.textContent) && document.querySelector('#pair-code')`, 8000), 'rema: helper there, no code → asks for the pairing code', await remaState());
+    await stateShot('rema-2-parkobling');
+    await evaluate(`document.querySelector('#pair-code').value = 'FAKE-WRNG-CODE-9999'; document.querySelector('#pair-form').requestSubmit(); return true;`);
+    check(await waitFor(`/stemmer ikke/.test(document.querySelector('#chain-connect').textContent)`, 8000), 'rema: a wrong code says so and is not kept');
+    check(await evaluate(`return localStorage.getItem('matkassa.helperPairing') === null;`), 'rema: wrong code not stored');
+    await evaluate(`document.querySelector('#pair-code').value = 'fake-pair-code-0001'; document.querySelector('#pair-form').requestSubmit(); return true;`);
+    check(await waitFor(`/Ikke koblet/.test(document.querySelector('#rema-state')?.textContent)`, 8000), 'rema: right code → "Ikke koblet" with a Koble til REMA button', await remaState());
+    check(await evaluate(`return !!document.querySelector('[data-chainact="login"]') && /Koble til REMA/.test(document.querySelector('[data-chainact="login"]').textContent);`), 'rema: "Koble til REMA" button shown');
+    await stateShot('rema-3-parkoblet-ikke-koblet');
+
+    await click('[data-chainact="login"]');
+    check(/Kobler til/.test(await remaState()), 'rema: tapping the button → "Kobler til …"', await remaState());
+    check(helperState.requests.some((r) => r.method === 'POST' && r.path === '/rema/login'), 'rema: the app asked the helper to start REMA\'s own login');
+    await stateShot('rema-4-kobler-til');
+    check(await waitFor(`/Synker|Koblet/.test(document.querySelector('#rema-state')?.textContent)`, 15000), 'rema: after the login the status moves on by itself (polling)', await remaState());
+    check(await waitFor(`/Koblet · siste synk/.test(document.querySelector('#rema-state')?.textContent)`, 15000), 'rema: the first sync runs by itself → "Koblet · siste synk …"', await remaState());
+    check(helperState.requests.some((r) => r.method === 'POST' && r.path === '/sync'), 'rema: first sync was started after connecting');
+    check(await evaluate(`return !!document.querySelector('[data-chainact="sync"]') && !!document.querySelector('[data-chainact="disconnect"]');`), 'rema: connected shows "Synk nå" and "Koble fra"');
+    await stateShot('rema-5-koblet');
+
+    const n = helperState.requests.filter((r) => r.path === '/sync').length;
+    await click('[data-chainact="sync"]');
+    check(helperState.requests.filter((r) => r.path === '/sync').length === n + 1, 'rema: "Synk nå" starts a sync');
+    check(await waitFor(`/Koblet · siste synk/.test(document.querySelector('#rema-state')?.textContent) && !document.querySelector('[data-chainact="sync"][disabled]')`, 15000), 'rema: "Synk nå" ends back at "Koblet"');
+
+    Object.assign(helperState.rema, { state: 'expired', lastSyncOk: false, message: 'REMA-innloggingen er utløpt. Logg inn på nytt.' });
+    await sleep(3100);
+    await merPage('kjeder');
+    check(await waitFor(`/Utløpt/.test(document.querySelector('#rema-state')?.textContent)`, 8000), 'rema: expired login → "Utløpt – logg inn på nytt"', await remaState());
+    check(await evaluate(`return /Logg inn på nytt/.test(document.querySelector('[data-chainact="login"]')?.textContent || '');`), 'rema: expired offers "Logg inn på nytt"');
+    await stateShot('rema-6-utlopt');
+
+    await click('[data-chainact="disconnect"]');
+    check(await waitFor(`/Ikke koblet/.test(document.querySelector('#rema-state')?.textContent)`, 8000) && helperState.requests.some((r) => r.path === '/rema/logout'), '"Koble fra" logs out on the Mac → "Ikke koblet"');
+
+    const actions = helperState.requests.filter((r) => r.method === 'POST');
+    check(actions.length >= 4 && actions.every((r) => /FAKE-PAIR-CODE-0001|FAKEPAIRCODE0001/i.test(r.auth)), 'rema: every helper action carried the pairing code', actions.length);
+    const settings = JSON.stringify(await readSettings());
+    check(!/PAIR|FAKEPAIR/i.test(settings), 'rema: the pairing code is not in the settings (so not in backups or the account)');
+    check(await noHScroll(), 'rema: no horizontal scroll on the Kjeder page');
+    await a11yAudit('rema-kjeder');
+  });
+
+  await inFreshContext('rema-phone', async () => {
+    helperState.requests.length = 0;
+    await navigate(BASE + 'index.html#mer');
+    await waitFor(`document.querySelector('[data-morepage="kjeder"]')`);
+    await merPage('kjeder');
+    check(await waitFor(`/Gjøres fra Mac-en/.test(document.querySelector('#rema-state')?.textContent)`, 8000), 'rema on a phone: "Gjøres fra Mac-en"', await remaState());
+    check(!(await evaluate(`return !!document.querySelector('[data-chainact="login"]');`)), 'rema on a phone: no login button');
+    await sleep(300);
+    check(!helperState.requests.length, 'rema on a phone: the app never calls the Mac helper', helperState.requests.length);
+    await stateShot('rema-7-telefon');
+  });
+}
+
 const ORIG_DB = 'matkassa';
 const dbNames = () => evaluate(`return (await indexedDB.databases()).map((d) => d.name + '@' + d.version).sort();`);
 async function isolationTests() {
@@ -607,8 +725,9 @@ async function cloudTests() {
       check(await evaluate(`return /Tilkoblet/.test(document.querySelector('[data-conn="trumf"]').textContent) && !!document.querySelector('[data-disconnect="trumf"]') && !!document.querySelector('[data-connect="rema"]');`), 'connect: Mer shows Trumf connected, REMA not');
       check(!supa.log.some((r) => /chain_connections\?select=[^&]*secret/.test(r.path)), 'connect: the app never asks for the secret');
       await click('[data-connect="rema"]');
-      check(await evaluate(`return document.querySelector('#dlg-connect').open && /reCAPTCHA/.test(document.querySelector('#connect-text').textContent);`), 'connect: "Koble til REMA" explains why it is done on the Mac (no bypassing reCAPTCHA)');
-      await evaluate(`document.querySelector('#dlg-connect button').click(); return true;`);
+      check(await waitFor(`/Gjøres fra Mac-en/.test(document.querySelector('#rema-state')?.textContent || '') && /reCAPTCHA/.test(document.querySelector('#chain-connect').textContent)`, 5000), 'connect: "Koble til" for REMA opens Mer → Kjeder, which explains it is done on the Mac (no bypassing reCAPTCHA)');
+      await merPage('konto');
+      await waitFor(`document.querySelector('[data-disconnect="trumf"]')`, 5000);
       await click('[data-disconnect="trumf"]');
       await sleep(500);
       check(!supa.tables.chain_connections.some((r) => r.user_id === A.id && r.chain === 'trumf'), '"Koble fra" deletes the connection (and with it the stored token)');
@@ -997,6 +1116,7 @@ try {
   check(await evaluate(`return document.querySelectorAll('#offer-list li').length > 0;`), 'huge data: app still renders offers');
 
   await motionTests();
+  await chainTests();
 
   // 11. Offline: service worker serves the app shell, data stays
   check(await waitFor(`navigator.serviceWorker && navigator.serviceWorker.controller`, 15000) || (await navigate(BASE + 'index.html#tilbud'), await waitFor(`navigator.serviceWorker.controller`, 15000)), 'service worker controls the page');

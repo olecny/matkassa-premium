@@ -6,6 +6,8 @@ import { parseExtraOffers, mergeExtraOffers, eanCoverage } from './extra-offers.
 import { defaultSettings, mergeSettings, validArea, validBudget } from './settings.js';
 import { detectImport, detectImportText, mergeReceipts, summarize, monthCompare, toNumber, UNCAT, BACKUP_SCHEMA, cleanBackup, cleanCategories, cleanRules, cleanList, validateReceipts, notFinite, friendlyError } from './spending.js';
 import { Cloud, cloudConfigured, reconcile, pickSettings, hash, COLLECTIONS } from './cloud.js';
+import { createConnection, pickProvider, STATES } from './chains/index.js';
+import { REMA } from './chains/rema.js';
 import { enableSheetDrag, watchLargeTitle, moveTabIndicator, exitRow, flip, enableSwipe, haptic } from './motion.js';
 
 const APP_VERSION = '0.6.1-premium';
@@ -1237,7 +1239,9 @@ const MORE_RENDER = {
       <p class="hint">Posisjonen rundes av til omtrent 1 km og lagres bare her på telefonen.</p></div>`,
   kjeder: () => {
     if (!state.settings.chainsSeen) { state.settings.chainsSeen = true; save.settings(); }
-    return `<div class="card"><p class="hint" style="margin-top:0">Slå av kjedene du ikke handler i. De vises da ikke i tilbudene eller i handlelisten.</p>
+    refreshChainSoon();
+    return `<div class="card" id="chain-connect">${chainCard()}</div>
+    <div class="card"><p class="hint" style="margin-top:0">Slå av kjedene du ikke handler i. De vises da ikke i tilbudene eller i handlelisten.</p>
       ${state.offersData ? `<div class="chain-toggles">${[...knownChains()].sort((a, b) => a.name.localeCompare(b.name, 'nb')).map((c) => `<label class="toggle"><input type="checkbox" data-chainshow="${esc(c.id)}" ${hiddenChains().has(c.id) ? '' : 'checked'}><span class="dot" style="--c:${esc(chainColor(c.id, c.color))}"></span>${esc(c.name)}</label>`).join('')}</div>` : '<p class="hint">Kjedene vises når tilbudene er hentet.</p>'}</div>`;
   },
   budsjett: () => `<div class="card"><form id="budget-form">
@@ -1468,9 +1472,102 @@ function accountCard() {
 
 const CONNECT_HELP = {
   trumf: 'Trumf kan ikke kobles til inne i appen: innloggingen (telefon, passord og SMS-kode) skjer bare på trumf.no, og Trumf har ingen innlogging for andre apper. Gjør det i stedet én gang på Mac-en: kjør «node ingest/trumf-login.mjs», logg inn hos Trumf i vinduet som åpnes, og lukk det. Deretter hentes kvitteringene hver søndag.',
-  rema: 'REMA kan ikke kobles til inne i appen: Æ-innloggingen er beskyttet med reCAPTCHA og sender deg bare tilbake til REMAs egen app, og det skal vi ikke omgå. Gjør det i stedet én gang på Mac-en: kjør «rema1000 login» og logg inn selv. Deretter hentes kvitteringene hver søndag.',
+  rema: 'REMA kobles til fra Matkassa på Mac-en: Mer → Kjeder → Koble til REMA. Du logger inn hos REMA selv, i REMAs eget innloggingsvindu, og kvitteringene hentes deretter. På telefonen kan det ikke gjøres, fordi REMAs innlogging er beskyttet med reCAPTCHA, og det omgår vi ikke.',
   coop: 'Coop har ingen åpen eller dokumentert måte å hente egne kvitteringer på. Bestill innsyn i stedet: coop.no → Min side → Bestill innsyn. Når du får fila, hent den inn under Mer → Kvitteringer.',
 };
+
+/* ---------- Koble til REMA (Mer → Kjeder). The login provider (Mac helper today, an iOS app later) is chosen in
+   js/chains/index.js; this part only shows the status and calls the connection's actions. ---------- */
+let remaConnection = null;
+let chainRefreshedAt = 0;
+function remaConn() {
+  if (!remaConnection) {
+    remaConnection = createConnection(REMA, pickProvider(), {
+      onChange: () => { const el = $('#chain-connect'); if (el) el.innerHTML = chainCard(); },
+      onSynced: afterChainSync,
+    });
+  }
+  return remaConnection;
+}
+function refreshChainSoon() {
+  if (Date.now() - chainRefreshedAt < 3000) return;
+  chainRefreshedAt = Date.now();
+  setTimeout(() => remaConn().refresh(), 0);
+}
+const chainLabel = (s) => {
+  if (s.syncing) return 'Synker …';
+  switch (s.state) {
+    case STATES.UNSUPPORTED: return 'Gjøres fra Mac-en';
+    case STATES.NOT_INSTALLED: return 'Hjelper ikke installert';
+    case STATES.NEEDS_PAIRING: return 'Koble appen til Mac-en';
+    case STATES.DISCONNECTED: return 'Ikke koblet';
+    case STATES.CONNECTING: return 'Kobler til …';
+    case STATES.CONNECTED: return `Koblet · ${s.lastSync ? `siste synk ${timeFmt.format(new Date(s.lastSync))}` : 'ikke synket ennå'}`;
+    case STATES.EXPIRED: return 'Utløpt – logg inn på nytt';
+    case STATES.ERROR: return 'Noe gikk galt';
+    default: return 'Sjekker …';
+  }
+};
+const chainBtn = (act, label, cls = '', busy = false) => `<button class="btn ${cls}" type="button" data-chainact="${act}"${busy ? ' aria-busy="true" disabled' : ''}>${label}</button>`;
+function chainCard() {
+  const s = remaConn().status;
+  const b = REMA.badge;
+  const msg = s.message ? `<p class="hint" role="alert">${esc(s.message)}</p>` : '';
+  let body = '';
+  if (s.state === STATES.UNSUPPORTED) {
+    const c = (cloudState.connections || []).find((x) => x.chain === 'rema');
+    body = `<p class="hint">REMA kobles til fra Matkassa på Mac-en (Mer → Kjeder). REMAs innlogging er beskyttet med reCAPTCHA og må skje i nettleseren der, og det omgår vi ikke. Kvitteringene kommer så hit via kontoen din eller synken fra Mac-en.</p>
+      ${c ? `<p class="hint">Koblet via Mac-en${c.last_fetch_at ? ` · hentet ${esc(timeFmt.format(new Date(c.last_fetch_at)))}` : ''}</p>` : ''}`;
+  } else if (s.state === STATES.NOT_INSTALLED) {
+    body = `<p class="hint">For å koble til REMA trenger Mac-en en liten hjelper som bare denne Mac-en kan nå. Slik installerer du den (én gang):</p>
+      <ol class="steps"><li>Åpne <b>Terminal</b> og gå til Matkassa-mappen (<code>mattilbud-app</code>).</li>
+      <li>Kjør <code>ingest/launchd/install-helper.sh</code>.</li>
+      <li>Kopier koden som vises, trykk <b>Prøv igjen</b> og lim den inn.</li></ol>
+      <div class="actions" style="margin-top:10px">${chainBtn('refresh', 'Prøv igjen')}</div>`;
+  } else if (s.state === STATES.NEEDS_PAIRING) {
+    body = `<form id="pair-form"><label class="field"><span>Kode fra Terminal</span><input id="pair-code" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40"></label>
+      <div class="actions" style="margin-top:8px"><button class="btn btn-primary" type="submit">Koble til Mac-en</button></div></form>
+      <p class="hint">Koden vises når hjelperen installeres, eller med <code>python3 ingest/helper.py pair</code>. Den lagres bare i denne nettleseren.</p>${msg}`;
+  } else if (s.state === STATES.DISCONNECTED) {
+    body = `<p class="hint">${esc(REMA.about)}</p>${msg}<div class="actions" style="margin-top:10px">${chainBtn('login', 'Koble til REMA', 'btn-primary')}</div>`;
+  } else if (s.state === STATES.CONNECTING) {
+    body = `<p class="hint">Logg inn hos REMA i nettleservinduet som åpnet seg (telefonnummer og kode). Kom tilbake hit etterpå. Ser du ikke vinduet, trykk <b>Åpne på nytt</b>.</p>
+      <div class="actions" style="margin-top:10px">${chainBtn('login', 'Åpne på nytt')}</div>`;
+  } else if (s.state === STATES.CONNECTED) {
+    body = `${s.lastSyncOk === false ? msg : ''}<div class="actions" style="margin-top:10px">${chainBtn('sync', s.syncing ? 'Synker …' : 'Synk nå', 'btn-primary', s.syncing)}${chainBtn('disconnect', 'Koble fra', 'btn-ghost', s.syncing)}</div>`;
+  } else if (s.state === STATES.EXPIRED) {
+    body = `${msg}<div class="actions" style="margin-top:10px">${chainBtn('login', 'Logg inn på nytt', 'btn-primary')}${chainBtn('disconnect', 'Koble fra', 'btn-ghost')}</div>`;
+  } else if (s.state === STATES.ERROR) {
+    body = `${msg}<div class="actions" style="margin-top:10px">${chainBtn('refresh', 'Prøv igjen')}</div>`;
+  }
+  return `<h2>Kvitteringer fra kjedene</h2>
+    <div class="chain-conn" data-state="${esc(s.state || 'checking')}">
+      <span class="chain-badge" style="--badge-bg:${b.bg};--badge-fg:${b.fg};--badge-stripe:${b.stripe}" aria-hidden="true">${esc(REMA.name)}</span>
+      <span class="chain-conn-text"><b>${esc(REMA.name)}</b><small id="rema-state" role="status">${esc(chainLabel(s))}</small></span>
+    </div>${body}`;
+}
+async function chainAction(act) {
+  const c = remaConn();
+  if (act === 'refresh') { chainRefreshedAt = Date.now(); await c.refresh(); return; }
+  if (act === 'login') {
+    const s = await c.login();
+    if (s.state === STATES.CONNECTING) toast('Logg inn hos REMA i vinduet som åpnet seg');
+    return;
+  }
+  if (act === 'sync') { await c.sync(); return; }
+  if (act === 'disconnect') {
+    if (!confirm('Koble fra REMA? Innloggingen hos REMA slettes fra Mac-en, og nye kvitteringer hentes ikke. Kvitteringene du alt har, beholdes.')) return;
+    const s = await c.disconnect();
+    if (s.state === STATES.DISCONNECTED) toast('REMA er koblet fra');
+  }
+}
+async function afterChainSync(s) {
+  if (s.lastSyncOk === false) { toast(s.state === STATES.EXPIRED ? 'REMA-innloggingen er utløpt' : 'Synken feilet – se Mer → Kjeder'); return; }
+  toast('REMA-kvitteringene er hentet');
+  // The Mac delivered them to the account and/or the private data repo; pull them in here too.
+  if (cloud && cloud.user) cloudSync({ quiet: true });
+  else if (state.settings.sync && state.settings.sync.token) syncSpending({ quiet: true });
+}
 
 async function accountAction(act, btn) {
   const email = () => ($('#login-email') ? $('#login-email').value.trim() : '');
@@ -1910,7 +2007,10 @@ function bind() {
   });
   $('#view-mer').addEventListener('click', async (e) => {
     const c = e.target.closest('[data-connect]');
+    if (c && c.dataset.connect === 'rema') { state.morePage = 'kjeder'; renderMore(); return; }
     if (c) { $('#connect-text').textContent = CONNECT_HELP[c.dataset.connect]; $('#dlg-connect').showModal(); return; }
+    const ca = e.target.closest('[data-chainact]');
+    if (ca) { chainAction(ca.dataset.chainact); return; }
     const d = e.target.closest('[data-disconnect]');
     if (d && cloud && confirm('Koble fra? Den lagrede innloggingen hos kjeden slettes fra serveren, og kvitteringer hentes ikke lenger automatisk. Kvitteringene du alt har, beholdes.')) {
       try { await cloud.disconnect(d.dataset.disconnect); cloudState.connections = (cloudState.connections || []).filter((x) => x.chain !== d.dataset.disconnect); toast('Koblet fra'); } catch (err) { toast(friendlyError(err)); }
@@ -1918,6 +2018,12 @@ function bind() {
     }
   });
   $('#view-mer').addEventListener('submit', async (e) => {
+    if (e.target.id === 'pair-form') {
+      e.preventDefault();
+      const s = await remaConn().pair($('#pair-code').value);
+      if (s.state !== STATES.NEEDS_PAIRING && s.state !== STATES.NOT_INSTALLED) toast('Appen er koblet til Mac-en');
+      return;
+    }
     if (e.target.id === 'login-form') {
       e.preventDefault();
       try {

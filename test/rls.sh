@@ -14,7 +14,7 @@ if [ -z "$PGBIN" ]; then
 fi
 if [ -z "$PGBIN" ]; then echo "SKIP rls: no PostgreSQL binaries (RLS untested here)"; exit 0; fi
 
-TMP="$(mktemp -d /tmp/mk-rls.XXXXXX)"
+TMP="$(mktemp -d /tmp/mk-rls.XXXXXX)"  # short path: the Unix socket path must stay under 104 bytes
 PORT=$((54000 + RANDOM % 900))
 cleanup() { "$PGBIN/pg_ctl" -D "$TMP/db" -m immediate stop >/dev/null 2>&1 || true; rm -rf "$TMP"; }
 trap cleanup EXIT
@@ -28,5 +28,9 @@ for f in supabase/migrations/*.sql; do "${PSQL[@]}" -f "$f" >/dev/null 2>&1 || {
 echo "PASS migrations apply cleanly and can be re-run"
 "${PSQL[@]}" -f supabase/tests/after_migrations.sql >/dev/null
 out="$("${PSQL[@]}" -f supabase/tests/rls_test.sql 2>&1)" || { echo "$out" | sed 's/^psql:[^ ]* //'; echo "FAIL rls"; exit 1; }
+echo "$out" | sed -n 's/.*NOTICE:  //p'
+for i in 1 2; do "${PSQL[@]}" -f supabase/seed.sql >/dev/null 2>&1 || { echo "FAIL seed.sql (run $i)"; "${PSQL[@]}" -f supabase/seed.sql; exit 1; }; done
+echo "PASS seed.sql applies cleanly and can be re-run"
+out="$("${PSQL[@]}" -f supabase/tests/rls_profiles_test.sql 2>&1)" || { echo "$out" | sed 's/^psql:[^ ]* //'; echo "FAIL rls (profiles)"; exit 1; }
 echo "$out" | sed -n 's/.*NOTICE:  //p'
 echo "All RLS tests passed"

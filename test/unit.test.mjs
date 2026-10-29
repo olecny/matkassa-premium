@@ -7,6 +7,9 @@ import { parseExtraOffers, mergeExtraOffers, eanCoverage } from '../js/extra-off
 import { normalizeOffer, AREAS, DEFAULT_AREA } from '../js/tjek.js';
 import { defaultSettings, mergeSettings, validArea } from '../js/settings.js';
 import { reconcile, hash, stable, pickSettings, cloudConfigured, Cloud } from '../js/cloud.js';
+import { createConnection, pickProvider, isMobileDevice, STATES } from '../js/chains/index.js';
+import { macHelperProvider } from '../js/chains/mac-helper.js';
+import { REMA } from '../js/chains/rema.js';
 
 let failed = 0;
 const ok = (c, m, d = '') => { console.log((c ? 'PASS ' : 'FAIL ') + m + (d && !c ? ` — ${d}` : '')); if (!c) { failed++; process.exitCode = 1; } };
@@ -431,5 +434,76 @@ ok(rb(100) < 100 && rb(400) - rb(300) < rb(100) - rb(0), 'sheet: dragging up rub
   ok(migrateCategories(moved).slice(0, 2).map((c) => c.id).join() === 'frukt,meieri', 'migrate: a list the user reordered keeps its order');
 }
 function R2(date, name) { return { id: date + name, date, total: 50, store: 'FAKE', lines: [{ name, amount: 50 }] }; }
+
+
+/* ---------- Koble til REMA: provider interface + Mac helper provider (FAKE helper, no network) ---------- */
+{
+  const mem = () => { const m = new Map(); return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k), m }; };
+  const CODE = 'FAKE-CODE-ABCD-EFGH';
+  const norm = (c) => c.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  // A fake helper: same JSON shape as ingest/helper.py.
+  const fakeHelper = (opts = {}) => {
+    const st = { rema: { state: 'disconnected', lastSync: null, lastSyncOk: null, message: null }, syncing: false, calls: [] };
+    const f = async (url, init = {}) => {
+      if (opts.down) throw new TypeError('Failed to fetch');
+      const path = new URL(url).pathname;
+      const auth = (init.headers || {}).Authorization || '';
+      st.calls.push(`${init.method} ${path}`);
+      const reply = (status, body) => ({ status, json: async () => body });
+      if (norm(auth.replace(/^Bearer /, '')) !== norm(CODE)) return reply(401, { error: 'unpaired', helper: 'matkassa' });
+      if (path === '/rema/login') st.rema.state = 'connecting';
+      if (path === '/sync') st.syncing = true;
+      if (path === '/rema/logout') st.rema = { state: 'disconnected' };
+      return reply(path === '/status' ? 200 : 202, { helper: 'matkassa', version: 1, rema: { ...st.rema }, syncing: st.syncing, token: undefined });
+    };
+    return { f, st };
+  };
+  const timers = () => { const q = []; return { setTimeout: (fn) => { q.push(fn); return q.length; }, clearTimeout: () => {}, run: async () => { const fn = q.shift(); if (fn) await fn(); }, q }; };
+
+  ok(isMobileDevice({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)' }), 'chains: an iPhone is a phone');
+  ok(isMobileDevice({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit', maxTouchPoints: 5 }), 'chains: an iPad (Mac UA + touch) counts as mobile');
+  ok(!isMobileDevice({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit', maxTouchPoints: 0 }), 'chains: a Mac is not a phone');
+  ok(pickProvider({ nav: { userAgent: 'iPhone' } }).id === 'unsupported' && pickProvider({ nav: { userAgent: 'Macintosh' }, storage: mem() }).id === 'mac-helper', 'chains: phone → "Gjøres fra Mac-en", Mac → helper');
+  ok(REMA.id === 'rema' && /^#[0-9a-f]{6}$/i.test(REMA.badge.bg) && !/logo|\.png|\.svg|http/i.test(JSON.stringify(REMA)), 'chains: REMA is a text badge (name + colours), no logo file or URL');
+
+  const phone = createConnection(REMA, pickProvider({ nav: { userAgent: 'iPhone' } }));
+  ok((await phone.refresh()).state === STATES.UNSUPPORTED && (await phone.login()).state === STATES.UNSUPPORTED, 'chains: on a phone every action says "unsupported", nothing is called');
+
+  const down = macHelperProvider({ storage: mem(), fetchImpl: fakeHelper({ down: true }).f });
+  ok((await down.status('rema')).state === 'disconnected', 'mac-helper: before the first tap nothing is asked ("Ikke koblet", no local-network request)');
+  ok((await down.login('rema')).state === 'not-installed' && (await down.status('rema')).state === 'not-installed', 'mac-helper: tapping Koble til with no helper → "Hjelper ikke installert" (and stays so on refresh)');
+  const ls = mem();
+  const h = fakeHelper();
+  const p = macHelperProvider({ storage: ls, fetchImpl: h.f });
+  await p.status('rema');
+  ok(!h.st.calls.length, 'mac-helper: no request to 127.0.0.1 before the user taps');
+  ok((await p.login('rema')).state === 'needs-pairing', 'mac-helper: helper there but no code → ask for the code');
+  ok((await p.pair('FAKE-WRONG-CODE-0000')).state === 'needs-pairing' && !ls.m.size, 'mac-helper: a wrong code is not saved');
+  const before = h.st.calls.length;
+  ok((await p.pair('short')).state === 'needs-pairing' && h.st.calls.length === before, 'mac-helper: a too short code is refused before asking the helper');
+  ok((await p.pair(' fake-code-abcd-efgh ')).state === 'disconnected' && ls.m.size === 1, 'mac-helper: the right code (any case, spaces) is saved → "Ikke koblet"');
+  ok(![...ls.m.values()].join().includes('-'), 'mac-helper: only the normalized code is stored, nothing else');
+
+  const t = timers();
+  const changes = [];
+  let synced = null;
+  const conn = createConnection(REMA, p, { onChange: (s) => changes.push(s.state + (s.syncing ? '+sync' : '')), onSynced: (s) => { synced = s; }, timers: t, pollMs: 1 });
+  await conn.refresh();
+  ok(conn.status.state === STATES.DISCONNECTED && !t.q.length, 'connection: idle status does not poll');
+  await conn.login();
+  ok(conn.status.state === STATES.CONNECTING && t.q.length === 1, 'connection: login → "Kobler til …" and polls');
+  h.st.rema = { state: 'connected', lastSync: null, lastSyncOk: null };
+  await t.run();
+  await new Promise((r) => setTimeout(r, 0));
+  ok(conn.status.state === STATES.CONNECTED && conn.status.syncing && h.st.calls.includes('POST /sync'), 'connection: when the login ends connected, the first sync starts by itself');
+  h.st.syncing = false; h.st.rema.lastSync = '2026-10-29T20:00:00+01:00'; h.st.rema.lastSyncOk = true;
+  await t.run();
+  ok(!conn.status.syncing && synced && synced.lastSyncOk === true && !t.q.length, 'connection: polling stops and onSynced runs when the sync is done');
+  await conn.disconnect();
+  ok(conn.status.state === STATES.DISCONNECTED && h.st.calls.includes('POST /rema/logout'), 'connection: "Koble fra" calls the helper logout');
+  ok(!changes.some((x) => /token|FAKE-CODE/i.test(x)) && !JSON.stringify(conn.status).includes('ABCD'), 'connection: no code or token ever in a status');
+  const throwing = createConnection(REMA, { id: 'x', status: async () => { throw new Error('boom'); } });
+  ok((await throwing.refresh()).state === STATES.ERROR, 'connection: a provider that throws gives an error state, not a crash');
+}
 
 console.log(failed ? `\n${failed} FAILED` : '\nAll unit tests passed');

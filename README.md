@@ -22,6 +22,11 @@ more premium look and feel, built from Emil Kowalski's design-engineering skills
 - **Imports:** Trumf innsyn (JSON), Coop innsyn (CSV/JSON, guessed format), `spending.json`, backup. The same purchase
   from two sources is kept once.
 - The Mac side (`ingest/`: REMA, Trumf, upload to the account, weekly sync) lives in the Matkassa repo.
+- **Koble til REMA** (Mer → Kjeder, v0.7): on the Mac the button talks to the local helper
+  (`../mattilbud-app/ingest/helper.py`, 127.0.0.1 only, paired once with a code) which opens REMA's own login in the
+  browser and runs the sync; on a phone it says "Gjøres fra Mac-en". The chain connection is a module with a swappable
+  login provider (`js/chains/index.js`: interface, `mac-helper.js`, `rema.js`), so a later iOS app only adds a provider.
+  `js/chains/` is identical in both apps.
 
 ## Run locally / test
 ```bash
@@ -30,7 +35,7 @@ node test/unit.test.mjs          # unit tests + isolation + "motion lint" (the n
 node test/e2e.mjs                # headless Chrome 390×844 over CDP, fake network → test/tmp/e2e-report.md
 node test/e2e.mjs --live         # the same against real Tjek offers (read-only)
 test/privacy.sh                  # no tokens or personal data in this public repo
-test/rls.sh                      # Supabase schema + RLS on a throwaway local Postgres (brew install postgresql@17)
+test/rls.sh                      # Supabase schema + RLS + FAKE seed (twice) on a throwaway local Postgres (brew install postgresql@17)
 ```
 The e2e suite is Matkassa's suite (including the location flow) plus: storage isolation next to a seeded "original"
 on the same origin, the one-way copy (no token), sheet drag/flick to dismiss with touch events, reduced motion, the

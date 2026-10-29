@@ -7,7 +7,7 @@ pass() { echo "PASS $1"; }
 bad() { echo "FAIL $1"; [ -n "${2:-}" ] && echo "$2" | head -5 | sed 's/^/     /'; fail=1; }
 
 # 1. Only app code, docs and FAKE fixtures are tracked.
-odd="$(git ls-files | grep -vE '^(index\.html|styles\.css|sw\.js|manifest\.webmanifest|README\.md|DESIGN\.md|\.gitignore|js/[a-z-]+\.js|icons/.*|supabase/(migrations/[0-9]+_[a-z_]+\.sql|schedule/[a-z_]+\.sql|tests/[a-z_]+\.sql)|test/(unit\.test\.mjs|e2e\.mjs|privacy\.sh|rls\.sh|fake-supabase\.mjs|fake/[a-z-]+-FAKE\.(json|csv)))$')"
+odd="$(git ls-files | grep -vE '^(index\.html|styles\.css|sw\.js|manifest\.webmanifest|README\.md|DESIGN\.md|\.gitignore|js/(chains/)?[a-z-]+\.js|icons/.*|supabase/(seed\.sql|migrations/[0-9]+_[a-z_]+\.sql|schedule/[a-z_]+\.sql|tests/[a-z_]+\.sql)|test/(unit\.test\.mjs|e2e\.mjs|privacy\.sh|rls\.sh|fake-supabase\.mjs|fake/[a-z-]+-FAKE\.(json|csv)))$')"
 [ -z "$odd" ] && pass "git ls-files: only app code, docs and FAKE fixtures" || bad "unexpected tracked files" "$odd"
 
 # 2. Nothing sensitive is tracked, even if git-ignore rules change later.

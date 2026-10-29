@@ -673,6 +673,15 @@ dialog label.check input { width: 22px; height: 22px; accent-color: var(--accent
 .conns span { display: grid; min-width: 0; }
 .conns small { color: var(--text-3); }
 
+/* ---------- Koble til REMA (Mer → Kjeder): a plain text badge in the chain's colours, no logo ---------- */
+.chain-conn { display: flex; align-items: center; gap: 12px; margin: 4px 0 6px; }
+.chain-badge { flex: none; display: inline-grid; place-items: center; min-width: 76px; min-height: 44px; padding: 0 10px; border-radius: 10px;
+  background: var(--badge-bg); color: var(--badge-fg); font: 800 .8125rem/1 system-ui, sans-serif; letter-spacing: .02em;
+  box-shadow: inset 0 -4px 0 var(--badge-stripe); white-space: nowrap; }
+.chain-conn-text { display: grid; min-width: 0; }
+.chain-conn-text small { color: var(--text-3); }
+.chain-conn[data-state="expired"] small, .chain-conn[data-state="error"] small { color: var(--danger, #c4332a); }
+
 
 /* ---------- Round 4: Mer as a settings list ---------- */
 .settings { list-style: none; margin: 0 0 18px; padding: 0; background: var(--surface); border-radius: var(--r-card); box-shadow: var(--shadow-card); overflow: hidden; }

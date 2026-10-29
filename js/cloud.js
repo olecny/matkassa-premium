@@ -206,7 +206,7 @@ export class Cloud {
 
   /** "Slett dataene mine i skyen": every row of this user (RLS limits the delete to them). */
   async wipe() {
-    for (const t of [...COLLECTIONS, 'settings', 'chain_connections']) await this.rest(`${t}?user_id=eq.${this.user.id}`, { method: 'DELETE' });
+    for (const t of [...COLLECTIONS, 'settings', 'chain_connections', 'profiles']) await this.rest(`${t}?user_id=eq.${this.user.id}`, { method: 'DELETE' });
   }
 }
 

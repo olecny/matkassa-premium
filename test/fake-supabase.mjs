@@ -8,7 +8,7 @@ export function makeFakeSupabase() {
   const users = new Map(); // email → {id, email, password}
   const access = new Map(); // access token → user id
   const refresh = new Map(); // refresh token → user id
-  const tables = { receipts: [], list_items: [], categories: [], rules: [], settings: [], chain_connections: [] };
+  const tables = { receipts: [], list_items: [], categories: [], rules: [], settings: [], chain_connections: [], profiles: [] };
   const log = []; // every request: {method, path, auth, body}
   let n = 0;
   let clock = Date.parse('2026-10-24T08:00:00Z');
