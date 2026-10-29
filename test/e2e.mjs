@@ -555,20 +555,39 @@ async function neonTests() {
     check(await evaluate(`const m = document.querySelector('#home-save [role="meter"]'); return m.getAttribute('aria-valuenow') === '312' && m.getAttribute('aria-valuemax') === '500' && /312 kroner spart av et mål på 500 kroner/.test(m.getAttribute('aria-valuetext'));`), 'neon meter: role=meter with value, max and a spoken text');
     await sleep(900);
     const fill = await scaleX('#home-save .meter-fill');
-    check(Math.abs(fill - 0.624) < 0.01, 'neon meter: the fill grows to 312/500 (scaleX, not width)', fill);
+    check(Math.abs(fill - 312 / 650) < 0.01, 'neon meter: the fill grows to 312 kr on a 650 kr scale (scaleX, not width)', fill);
+    const mk = await evaluate(`const row = document.querySelector('#home-save .save-row').getBoundingClientRect(); const h = document.querySelector('.save-handle'); const t = h.querySelector('.goal-tick').getBoundingClientRect(); const l = h.querySelector('.goal-label');
+      return { label: l.textContent.trim(), x: (t.left + t.width / 2 - row.left) / row.width, onBar: t.top <= row.top + row.height / 2 && t.bottom >= row.top + row.height / 2, role: h.getAttribute('role'), name: h.getAttribute('aria-label'), vt: h.getAttribute('aria-valuetext') };`);
+    check(mk.label === 'Mål 500 kr' && Math.abs(mk.x - 500 / 650) < 0.02 && mk.onBar && mk.role === 'slider' && /Sparemål/.test(mk.name) && mk.vt === 'Mål: 500 kroner', 'B1 meter: the goal is a labelled marker on the bar ("Mål 500 kr"), a named slider', JSON.stringify(mk));
     check(await evaluate(`return getComputedStyle(document.querySelector('.meter-glow')).boxShadow !== 'none';`), 'neon meter: sale glow in dark');
     await click('#home-save .save-what');
     check(await evaluate(`return !document.querySelector('#save-list').hidden && /TINE HELMELK/.test(document.querySelector('#save-list').textContent);`), 'neon meter: tapping shows what the savings are made of');
     await click('#home-save .save-what');
-    await ptr('#home-save .save-row', 'pointerdown', 40, 20);
-    await ptr('#home-save .save-row', 'pointermove', 60, 21);
-    await ptr('#home-save .save-row', 'pointermove', 80, 21);
-    await ptr('#home-save .save-row', 'pointerup', 80, 21);
-    await sleep(300);
+    // drag the marker to the right end of the bar: the goal grows and the marker follows the finger
+    const atRow = (type, f) => evaluate(`const row = document.querySelector('#home-save .save-row').getBoundingClientRect(); const h = document.querySelector('.save-handle'); const t = h.getBoundingClientRect();
+      h.dispatchEvent(new PointerEvent(${JSON.stringify(type)}, { bubbles: true, pointerId: 9, pointerType: 'touch', isPrimary: true, clientX: ${f} == null ? t.left + t.width / 2 : row.left + row.width * ${f}, clientY: t.top + 20 })); return true;`);
+    const tickX = () => evaluate(`const row = document.querySelector('#home-save .save-row').getBoundingClientRect(); const t = document.querySelector('.goal-tick').getBoundingClientRect(); return (t.left + t.width / 2 - row.left) / row.width;`);
+    await atRow('pointerdown', null);
+    await atRow('pointermove', 0.85);
+    await atRow('pointermove', 1);
+    await sleep(80);
+    const mid = { x: await tickX(), label: await evaluate(`return document.querySelector('.goal-label').textContent.trim();`), list: await evaluate(`return document.querySelector('#save-list').hidden;`) };
+    await atRow('pointerup', 1);
+    await sleep(600);
     const g = await evaluate(`return document.querySelector('#home-save .save-sub').textContent;`);
-    check(/650 kr/.test(g) && (await readSettings()).saveGoal === 650, 'neon meter: dragging the bar sets the goal in 50 kr steps and saves it', g);
-    for (let i = 0; i < 3; i++) await evaluate(`document.querySelector('.save-handle').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); return true;`);
-    check(await evaluate(`return document.querySelector('.save-handle').getAttribute('aria-valuenow') === '500';`), 'neon meter: the goal slider works with arrow keys');
+    check(mid.x > 0.97 && mid.label === 'Mål 650 kr' && mid.list, 'B1 meter: dragging the marker right makes the goal bigger, and the marker follows the finger', JSON.stringify(mid));
+    check(/650 kr/.test(g) && (await readSettings()).saveGoal === 650 && Math.abs((await tickX()) - 650 / 850) < 0.02, 'B1 meter: on release the goal is saved and the bar rescales (marker at ~80 %)', g);
+    const key = (k) => evaluate(`document.querySelector('.save-handle').dispatchEvent(new KeyboardEvent('keydown', { key: '${k}', bubbles: true })); return true;`);
+    await key('Home');
+    await sleep(500);
+    check(await evaluate(`const row = document.querySelector('#home-save .save-card, #home-save').getBoundingClientRect(); const l = document.querySelector('.goal-label').getBoundingClientRect(); return document.querySelector('.goal-label').textContent.trim() === 'Mål 50 kr' && l.left >= row.left && l.right <= row.right;`), 'B1 meter: Home sets the smallest goal, and the label stays inside the card');
+    await key('PageUp');
+    for (let i = 0; i < 1; i++) await key('ArrowLeft');
+    check(await evaluate(`return document.querySelector('.save-handle').getAttribute('aria-valuenow') === '500' && document.querySelector('.goal-label').textContent.trim() === 'Mål 500 kr';`), 'neon meter: the goal slider works with arrow keys and Page Up/Down');
+    await ptr('#home-save .save-row', 'pointerdown', 20, 22);
+    await ptr('#home-save .save-row', 'pointerup', 20, 22);
+    check(await evaluate(`return !document.querySelector('#save-list').hidden;`), 'neon meter: a tap on the bar itself still opens the list');
+    await click('#home-save .save-what');
     await sleep(300);
     await v07Shot('neon-dark-hjem');
 
@@ -592,6 +611,12 @@ async function neonTests() {
     await ptr('.donut', 'pointerup', 236, 130);
     check(await evaluate(`return !!document.querySelector('.donut .arc.sel');`), 'neon donut: dragging around the ring picks the arc under the finger');
     await evaluate(`const a = document.querySelector('.donut .arc'); a.focus(); a.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return true;`);
+    // B3: keyboard focus shows a ring in the --text colour (a real key press makes the focus :focus-visible)
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 }, S);
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 }, S);
+    const fr = await evaluate(`const a = document.querySelectorAll('.donut .arc')[1]; a.focus(); const r = a.querySelector('.arc-ring'); return { fv: a.matches(':focus-visible'), op: getComputedStyle(r).opacity, stroke: getComputedStyle(r).stroke, text: getComputedStyle(document.body).color, w: getComputedStyle(r).strokeWidth };`);
+    check(fr.fv && fr.op === '1' && fr.stroke === fr.text && fr.w === '32px', 'B3 donut: a keyboard-focused arc gets a visible ring (--text, ≥ 3:1 on the card)', JSON.stringify(fr));
+    await evaluate(`document.activeElement.blur(); return true;`);
     await click('[data-month="-1"]');
     check(await evaluate(`return /:/.test(document.querySelector('#sr-live').textContent) && /kroner/.test(document.querySelector('#sr-live').textContent);`), 'neon donut: a month change is announced (aria-live)', await evaluate(`return document.querySelector('#sr-live').textContent;`));
     await click('[data-month="1"]');
@@ -631,6 +656,14 @@ async function neonTests() {
     for (const t of ['hjem', 'tilbud', 'liste', 'forbruk', 'mer']) { await tab(t); await sleep(t === 'forbruk' ? 700 : 250); await v07Shot(`neon-lys-${t}`); }
     await evaluate(`const s = document.querySelector('[data-theme-select]'); s.value = 'dark'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
     check(await evaluate(`return document.documentElement.dataset.theme === 'dark' && getComputedStyle(document.body).backgroundColor === 'rgb(5, 7, 10)';`) && (await readSettings()).theme === 'dark', 'neon: Mer → Tema → Mørkt wins over a light phone, and is saved');
+    // B6: on the next start the chosen theme is there before the app (and IndexedDB) has loaded
+    const { identifier } = await send('Page.addScriptToEvaluateOnNewDocument', { source: `document.addEventListener('DOMContentLoaded', () => { window.__themeAtDCL = (document.documentElement.dataset.theme || '-') + '|' + getComputedStyle(document.body).backgroundColor; }, { once: true });` }, S);
+    await navigate(BASE + 'index.html#mer');
+    await waitFor(`window.__themeAtDCL`);
+    const early = await evaluate(`return window.__themeAtDCL;`);
+    await send('Page.removeScriptToEvaluateOnNewDocument', { identifier }, S);
+    check(early === 'dark|rgb(5, 7, 10)', 'B6 theme: the saved theme is applied before the first paint (no flash of the phone\'s theme)', early);
+    await waitFor(`document.querySelector('[data-theme-select]')`);
     await evaluate(`const s = document.querySelector('[data-theme-select]'); s.value = 'auto'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
     check(await evaluate(`return !document.documentElement.dataset.theme;`), 'neon: Tema → Som telefonen follows the phone again');
     await a11yAudit('neon-mer');
@@ -645,7 +678,7 @@ async function neonTests() {
     await v07Shot('neon-dark-forbruk-redusert-bevegelse');
     await tab('hjem');
     const rf = await scaleX('#home-save .meter-fill');
-    check(Math.abs(rf - 0.624) < 0.01, 'reduced motion: the meter is filled at once', rf);
+    check(Math.abs(rf - 312 / 650) < 0.01, 'reduced motion: the meter is filled at once', rf);
     await tab('tilbud');
     await waitFor(`document.querySelectorAll('#offer-list .offer').length > 0`);
     await ptr('#offer-list .offer .info', 'pointerdown', 40, 20);

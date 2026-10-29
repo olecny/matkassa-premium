@@ -819,7 +819,11 @@ html.big-text input, html.big-text select, html.big-text textarea { font-size: 1
 .donut.morph .arc-vis { transition: stroke-dasharray 450ms var(--ease-out), stroke-dashoffset 450ms var(--ease-out); }
 .donut.has-sel .arc:not(.sel) { opacity: .35; }
 .arc.sel { transform: scale(1.06); }
-.arc:focus-visible .arc-vis { stroke: var(--focus); }
+.arc-ring, .arc-gap { stroke-width: 32; stroke: var(--text); opacity: 0; pointer-events: none; }
+.arc-gap { stroke-width: 26; stroke: var(--surface); }
+/* Keyboard focus: a --text ring around the arc with a thin --surface gap (≥ 3:1 against the card in both themes) */
+.arc:focus-visible .arc-ring, .arc:focus-visible .arc-gap { opacity: 1; }
+.donut.has-sel .arc:focus-visible { opacity: 1; }
 .donut-center { position: absolute; inset: 22%; display: grid; place-content: center; text-align: center; pointer-events: none; gap: 2px; }
 .donut-center.swap > * { animation: fig-fade 150ms ease; }
 .dc-label { font-size: .75rem; letter-spacing: .04em; color: var(--text-2); max-width: 9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -843,7 +847,7 @@ html.big-text input, html.big-text select, html.big-text textarea { font-size: 1
 .save-num { margin: 0; font-size: 1rem; color: var(--text-2); }
 .save-v { font: 600 34px/1.1 var(--font-display); letter-spacing: -0.022em; font-variant-numeric: tabular-nums; color: var(--text); }
 .save-sub { margin: 2px 0 10px; color: var(--text-2); font-size: .9375rem; font-variant-numeric: tabular-nums; }
-.save-row { position: relative; display: flex; align-items: center; gap: 10px; min-height: 44px; touch-action: pan-y; cursor: ew-resize; -webkit-user-select: none; user-select: none; }
+.save-row { position: relative; display: flex; align-items: center; min-height: 44px; margin: 4px 0 26px; touch-action: pan-y; -webkit-user-select: none; user-select: none; container-type: inline-size; }
 .meter { position: relative; flex: 1; height: 14px; border-radius: 7px; background: var(--fill); container-type: inline-size; }
 .meter-glow { position: absolute; top: 0; bottom: 0; left: 0; width: calc(var(--pf, 0) * 100%); border-radius: inherit; box-shadow: var(--glow-sale); opacity: .55; }
 .meter-fill { position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(90deg, var(--sale), #ffc27a); transform: scaleX(var(--p)); transform-origin: left; }
@@ -853,9 +857,17 @@ html.big-text input, html.big-text select, html.big-text textarea { font-size: 1
 .meter.dragging .meter-fill, .meter.dragging .meter-cap { transition: none; }
 .meter.pulse .meter-glow { animation: meter-pulse 600ms var(--ease-in-out) 700ms 1; }
 @keyframes meter-pulse { 50% { opacity: 1; } }
-.save-handle { flex: none; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; }
-.save-handle::before { content: ""; width: 18px; height: 18px; border-radius: 50%; background: var(--surface-2); box-shadow: 0 0 0 1.5px var(--text-3); }
-.save-handle:focus-visible::before { box-shadow: 0 0 0 2px var(--focus); }
+/* The goal marker: a tick on the bar with a "Mål 500 kr" label under it; it is the (focusable) Sparemål slider */
+.save-handle { position: absolute; top: 0; left: 0; width: 44px; height: 70px; margin-left: -22px; display: flex; flex-direction: column; align-items: center;
+  transform: translateX(calc(var(--g, .8) * 100cqw)); transition: transform 450ms var(--ease-out); touch-action: none; cursor: ew-resize; outline: none; }
+.save-row.dragging .save-handle { transition: none; }
+.goal-tick { width: 4px; height: 28px; margin-top: 8px; border-radius: 2px; background: var(--text); box-shadow: 0 0 0 2px var(--surface); }
+.goal-label { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; padding: 3px 9px 3px 7px; border-radius: 999px; white-space: nowrap;
+  font-size: .8125rem; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); background: var(--surface-2); box-shadow: 0 0 0 1px var(--text-3);
+  transform: translateX(var(--lx, 0px)); }
+.goal-label svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.save-handle:focus-visible .goal-label, .save-row.dragging .goal-label { box-shadow: 0 0 0 2px var(--focus); }
+.save-handle:focus-visible .goal-tick { box-shadow: 0 0 0 2px var(--focus); }
 .save-what { padding-left: 0; }
 .save-list { list-style: none; margin: 0; padding: 0; }
 .save-list li { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; box-shadow: inset 0 0.5px 0 var(--separator); font-variant-numeric: tabular-nums; }
@@ -882,7 +894,7 @@ html.big-text input, html.big-text select, html.big-text textarea { font-size: 1
 @keyframes edge-fade { 0%, 100% { opacity: 0; } 15%, 85% { opacity: 1; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .donut .arc, .donut .arc-vis, .meter-fill, .meter-cap, .meter-glow, .offer, .offer .thumb, .tilt-light { transition: none !important; }
+  .donut .arc, .donut .arc-vis, .meter-fill, .meter-cap, .meter-glow, .save-handle, .offer, .offer .thumb, .tilt-light { transition: none !important; }
   .arc.sel { transform: none; }
   .donut-glow { stroke: var(--text); stroke-width: 27; opacity: 1; }
   .donut.has-sel .arc.sel .arc-vis { stroke-width: 22; }

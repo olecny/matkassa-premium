@@ -30,8 +30,10 @@ export function arcAt(layout, x, y) {
 
 /** Savings meter: fill fraction 0–1. */
 export const meterFraction = (saved, goal) => (goal > 0 && saved > 0 ? clamp(saved / goal, 0, 1) : 0);
-/** Dragging the meter moves the goal in steps of 50 kr (one step per 16 px), within 50–20 000. */
-export const goalAfterDrag = (startGoal, dx, pxPerStep = 16) => clamp(Math.round(startGoal / 50 + dx / pxPerStep) * 50, 50, 20000);
+/** The meter's scale (kr at the right end): room above the goal so the "Mål" marker sits ~80 % along. */
+export const meterScale = (saved, goal) => Math.ceil((Math.max(goal, saved, 50) * 1.25) / 50) * 50;
+/** The goal under a finger at fraction f (0–1) of a meter with that scale: 50 kr steps, within 50–20 000. */
+export const goalAt = (f, scale) => clamp(Math.round((clamp(f, 0, 1) * scale) / 50) * 50, 50, 20000);
 
 /** Ids of the best offers (highest discount, at least minDiscount), at most n. */
 export function bestOfferIds(items, discountOf, n = 3, minDiscount = 0.2) {

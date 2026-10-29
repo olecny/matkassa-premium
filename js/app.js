@@ -8,10 +8,10 @@ import { detectImport, detectImportText, mergeReceipts, summarize, monthCompare,
 import { Cloud, cloudConfigured, reconcile, pickSettings, hash, COLLECTIONS } from './cloud.js';
 import { createConnection, pickProvider, STATES } from './chains/index.js';
 import { REMA } from './chains/rema.js';
-import { DONUT, arcLayout, dash, arcAt, meterFraction, goalAfterDrag, bestOfferIds, enableTilt, shineBestOffers, reducedMotion } from './figures.js';
+import { DONUT, arcLayout, dash, arcAt, meterFraction, meterScale, goalAt, bestOfferIds, enableTilt, shineBestOffers, reducedMotion } from './figures.js';
 import { enableSheetDrag, watchLargeTitle, moveTabIndicator, exitRow, flip, enableSwipe, haptic } from './motion.js';
 
-const APP_VERSION = '0.7.0-premium.rc1';
+const APP_VERSION = '0.7.0-premium.rc2';
 const STALE_MS = 6 * 60 * 60 * 1000;
 const PAGE = 60;
 const TABS = ['hjem', 'tilbud', 'liste', 'forbruk', 'mer'];
@@ -70,10 +70,13 @@ function applyTextSize() {
 }
 /** Mer → Tema: 'auto' follows the phone (prefers-color-scheme), else forced dark/light. Dark is the default. */
 const THEME_COLOR = { dark: '#05070a', light: '#f1f4f7' };
+const THEME_KEY = 'matkassa-premium-theme';
 function applyTheme() {
   const t = state.settings.theme || 'auto';
   const root = document.documentElement;
   if (t === 'auto') delete root.dataset.theme; else root.dataset.theme = t;
+  // mirror for the inline script in index.html, which sets the theme before the first paint
+  try { if (t === 'auto') localStorage.removeItem(THEME_KEY); else localStorage.setItem(THEME_KEY, t); } catch { /* private mode */ }
   for (const m of document.querySelectorAll('meta[name="theme-color"]')) {
     const scheme = /light/.test(m.media) ? 'light' : 'dark';
     m.content = THEME_COLOR[t === 'auto' ? scheme : t];
@@ -842,15 +845,17 @@ function saveCard() {
     <h2 id="save-h" class="sr-only">Spart denne måneden</h2>
     <p class="save-num"><span class="save-v">${krShort(saved)}</span> spart</p>
     <p class="save-sub">${goalText(goal)}</p>
-    <div class="save-row">
+    <div class="save-row" style="--g:${goal / meterScale(saved, goal)}">
       <div class="meter" role="meter" aria-label="Spart denne måneden" aria-valuemin="0" aria-valuemax="${Math.max(goal, Math.round(saved))}" aria-valuenow="${Math.round(saved)}"
-        aria-valuetext="${krWords(saved)} spart av et mål på ${krWords(goal)}" style="--p:${meterFraction(saved, goal)};--pf:${meterFraction(saved, goal)}">
+        aria-valuetext="${krWords(saved)} spart av et mål på ${krWords(goal)}" style="--p:${saved / meterScale(saved, goal)};--pf:${saved / meterScale(saved, goal)}">
         <div class="meter-glow"></div><div class="meter-fill"></div><div class="meter-cap"></div>
       </div>
-      <span class="save-handle" role="slider" tabindex="0" aria-label="Sparemål" aria-valuemin="50" aria-valuemax="20000" aria-valuenow="${goal}" aria-valuetext="${krWords(goal)}"></span>
+      <span class="save-handle" role="slider" tabindex="0" aria-label="Sparemål, dra eller bruk piltastene" aria-valuemin="50" aria-valuemax="20000" aria-valuenow="${goal}" aria-valuetext="Mål: ${krWords(goal)}">
+        <span class="goal-tick" aria-hidden="true"></span><span class="goal-label" aria-hidden="true"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2.5 1 6l3 3.5M8 2.5 11 6l-3 3.5"/></svg>Mål ${krShort(goal)}</span>
+      </span>
     </div>
     <button type="button" class="linkish save-what" aria-expanded="false" aria-controls="save-list">${items.length ? 'Hva har jeg spart på?' : 'Hvordan regnes dette?'}</button>
-    <ul id="save-list" class="save-list" hidden>${items.length ? items.map((x) => `<li><span>${esc(x.text)}</span><b>${krShort(x.kr)}</b></li>`).join('') : '<li class="hint">Kryss av varer du har lagt i listen fra et tilbud, så regnes det du sparer mot vanlig pris. Dra i staven for å endre målet.</li>'}</ul>
+    <ul id="save-list" class="save-list" hidden>${items.length ? items.map((x) => `<li><span>${esc(x.text)}</span><b>${krShort(x.kr)}</b></li>`).join('') : '<li class="hint">Kryss av varer du har lagt i listen fra et tilbud, så regnes det du sparer mot vanlig pris. Dra «Mål»-merket på staven for å endre målet.</li>'}</ul>
   </section>`;
 }
 function initMeter(card) {
@@ -860,8 +865,20 @@ function initMeter(card) {
   const sub = card.querySelector('.save-sub');
   const saved = savedThisMonth();
   const reduce = reducedMotion();
-  const p = meterFraction(saved, state.settings.saveGoal || 500);
+  const row = card.querySelector('.save-row');
+  const label = card.querySelector('.goal-label');
+  let scale = meterScale(saved, state.settings.saveGoal || 500);
+  const p = saved / scale;
   const setP = (v) => meter.style.setProperty('--p', v);
+  // keep the "Mål" label inside the card when the marker is near an end
+  const placeLabel = () => {
+    const w = row.clientWidth;
+    const lw = label.offsetWidth;
+    const x = (state.settings.saveGoal || 500) / scale * w;
+    const shift = Math.min(w - lw / 2, Math.max(lw / 2, x)) - x;
+    label.style.setProperty('--lx', `${shift.toFixed(1)}px`);
+  };
+  requestAnimationFrame(placeLabel);
   if (!reduce) {
     meter.classList.add(meterShownP == null ? 'first' : 'update');
     setP(meterShownP ?? 0);
@@ -870,18 +887,23 @@ function initMeter(card) {
   }
   meterShownP = p;
   const month = todayISO().slice(0, 7);
-  if (p >= 1 && !meterPulsed.has(month)) { meterPulsed.add(month); if (!reduce) meter.classList.add('pulse'); }
+  if (meterFraction(saved, state.settings.saveGoal || 500) >= 1 && !meterPulsed.has(month)) { meterPulsed.add(month); if (!reduce) meter.classList.add('pulse'); }
 
-  const setGoal = (g, persist) => {
+  const setGoal = (g, persist, rescale = persist) => {
     state.settings.saveGoal = g;
     sub.textContent = goalText(g);
     handle.setAttribute('aria-valuenow', g);
-    handle.setAttribute('aria-valuetext', krWords(g));
+    handle.setAttribute('aria-valuetext', `Mål: ${krWords(g)}`);
+    label.lastChild.textContent = `Mål ${krShort(g)}`;
     meter.setAttribute('aria-valuemax', Math.max(g, Math.round(saved)));
     meter.setAttribute('aria-valuetext', `${krWords(saved)} spart av et mål på ${krWords(g)}`);
-    meterShownP = meterFraction(saved, g);
+    // while a finger drags, the scale stays put so the marker follows it; afterwards it settles at ~80 %
+    if (rescale) scale = meterScale(saved, g);
+    meterShownP = saved / scale;
     setP(meterShownP);
     meter.style.setProperty('--pf', meterShownP);
+    row.style.setProperty('--g', g / scale);
+    placeLabel();
     if (persist) save.settings();
   };
   const toggleList = () => {
@@ -892,34 +914,46 @@ function initMeter(card) {
   };
   card.querySelector('.save-what').addEventListener('click', toggleList);
   handle.addEventListener('keydown', (e) => {
-    const step = { ArrowRight: 50, ArrowUp: 50, ArrowLeft: -50, ArrowDown: -50 }[e.key];
-    if (!step) return;
+    const g0 = state.settings.saveGoal || 500;
+    const step = { ArrowRight: 50, ArrowUp: 50, ArrowLeft: -50, ArrowDown: -50, PageUp: 500, PageDown: -500 }[e.key];
+    const g = step ? g0 + step : e.key === 'Home' ? 50 : e.key === 'End' ? 20000 : null;
+    if (g == null) return;
     e.preventDefault();
-    setGoal(Math.min(20000, Math.max(50, (state.settings.saveGoal || 500) + step)), true);
+    setGoal(Math.min(20000, Math.max(50, g)), true);
   });
-  const row = card.querySelector('.save-row');
+  // Drag the "Mål" marker: it follows the finger along the bar (right = a bigger goal). A tap elsewhere on the
+  // bar opens the list, as before.
   let drag = null;
-  row.addEventListener('pointerdown', (e) => { drag = { x0: e.clientX, y0: e.clientY, id: e.pointerId, g0: state.settings.saveGoal || 500, on: false }; });
+  const goalFromX = (x) => { const r = row.getBoundingClientRect(); return goalAt((x - r.left) / r.width, scale); };
+  const endDrag = () => {
+    if (drag && drag.on) { row.classList.remove('dragging'); meter.classList.remove('dragging'); setGoal(state.settings.saveGoal, true); }
+    drag = null;
+  };
+  row.addEventListener('pointerdown', (e) => {
+    if (e.button > 0) return;
+    drag = { x0: e.clientX, y0: e.clientY, id: e.pointerId, onHandle: !!e.target.closest('.save-handle'), on: false };
+  });
   row.addEventListener('pointermove', (e) => {
     if (!drag || e.pointerId !== drag.id) return;
     const dx = e.clientX - drag.x0;
     const dy = e.clientY - drag.y0;
     if (!drag.on) {
-      if (Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx)) { drag = null; return; }
-      if (Math.abs(dx) < 6) return;
+      if (!drag.onHandle || (Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx))) { if (Math.abs(dx) + Math.abs(dy) > 8) drag = null; return; }
+      if (Math.abs(dx) < 4) return;
       drag.on = true;
+      row.classList.add('dragging');
       meter.classList.add('dragging');
       try { row.setPointerCapture(e.pointerId); } catch { /* synthetic events */ }
     }
-    const g = goalAfterDrag(drag.g0, dx);
-    if (g !== state.settings.saveGoal) setGoal(g, false);
+    const g = goalFromX(e.clientX);
+    if (g !== state.settings.saveGoal) setGoal(g, false, false);
   });
   row.addEventListener('pointerup', () => {
     if (!drag) return;
-    if (drag.on) { meter.classList.remove('dragging'); save.settings(); } else toggleList();
-    drag = null;
+    if (drag.on) endDrag();
+    else { if (!drag.onHandle) toggleList(); drag = null; }
   });
-  row.addEventListener('pointercancel', () => { if (drag && drag.on) { meter.classList.remove('dragging'); save.settings(); } drag = null; });
+  row.addEventListener('pointercancel', endDrag);
 }
 /** "1 vare", "2 varer". */
 const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -993,7 +1027,7 @@ function donutCard(m, rows) {
     const d = dash(lay[i]);
     const circ = (cls) => `<circle class="${cls}" cx="100" cy="100" r="${DONUT.R}" stroke-dasharray="${d.array}" stroke-dashoffset="${d.offset}" transform="rotate(-90 100 100)"/>`;
     return `<g class="arc" role="button" tabindex="0" aria-pressed="false" data-arc="${i}" data-cat="${esc(id)}" data-len="${lay[i].len}" data-start="${lay[i].start}"
-      aria-label="${esc(catName(id))}: ${esc(krWords(v))}, ${pct} prosent" style="--c:${esc(c ? catColor(c) : 'var(--text-3)')}">${circ('arc-hit')}${circ('arc-vis')}</g>`;
+      aria-label="${esc(catName(id))}: ${esc(krWords(v))}, ${pct} prosent" style="--c:${esc(c ? catColor(c) : 'var(--text-3)')}">${circ('arc-hit')}${circ('arc-ring')}${circ('arc-gap')}${circ('arc-vis')}</g>`;
   }).join('');
   const legend = rows.map(([id, v], i) => {
     const c = catById(id);

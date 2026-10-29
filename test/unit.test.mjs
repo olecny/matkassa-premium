@@ -122,7 +122,15 @@ ok(!/\.put\(|readwrite/.test(dbSrc.slice(dbSrc.indexOf('export async function re
 const manifest = JSON.parse(fs.readFileSync(new URL('../manifest.webmanifest', import.meta.url), 'utf8'));
 ok(manifest.scope === './' && manifest.start_url.startsWith('./') && /Premium/.test(manifest.name), 'manifest: relative scope (/matkassa-premium/), own name');
 const appSrcP = fs.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
-ok(!/localStorage|sessionStorage/.test(appSrcP), 'app: no shared localStorage keys at all (everything in its own IndexedDB)');
+{
+  // Both apps share the github.io origin. Data lives in IndexedDB; the only localStorage use is the theme mirror
+  // (B6: theme before first paint), under a key the original never uses.
+  const ls = [...appSrcP.matchAll(/(localStorage|sessionStorage)\.\w+\(([^,)]+)/g)].map((m) => m[2].trim());
+  const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  ok(!/sessionStorage/.test(appSrcP) && ls.length > 0 && ls.every((k) => k === 'THEME_KEY') && /const THEME_KEY = 'matkassa-premium-theme'/.test(appSrcP)
+    && /localStorage\.getItem\('matkassa-premium-theme'\)/.test(html) && (!fs.existsSync(new URL('../../mattilbud-app/js/app.js', import.meta.url)) || !/matkassa-premium-theme/.test(fs.readFileSync(new URL('../../mattilbud-app/js/app.js', import.meta.url), 'utf8'))),
+  'app: no shared localStorage keys (only the Premium-only theme mirror; everything else in its own IndexedDB)', ls.join(','));
+}
 ok(/matkassa-premium-backup-/.test(appSrcP), 'app: own backup file name (same, compatible backup format)');
 
 /* ---------- motion lint: the never-ship rules from the design skills, checked on styles.css ---------- */
@@ -544,7 +552,11 @@ function R2(date, name) { return { id: date + name, date, total: 50, store: 'FAK
     check('thumb-ink', 'thumb-bg', 4.5);
     for (const k of Object.keys(t).filter((x) => x.startsWith('cat-'))) check(k, 'surface', 3);
     ok(!bad.length, `contrast ${name}: all text ≥ 4.5:1, category colours ≥ 3:1 (WCAG 2.1)`, bad.join(' | '));
+    // B3: the donut's keyboard focus ring is --text on the card (--surface); the goal marker's tick too
+    const ring = ratio(parse(t.text), parse(t.surface));
+    ok(ring >= 3, `contrast ${name}: donut focus ring and goal marker ≥ 3:1 against the card (WCAG 1.4.11)`, ring.toFixed(2));
   }
+  ok(/\.arc:focus-visible \.arc-ring/.test(raw) && /\.arc-ring, \.arc-gap \{[^}]*stroke: var\(--text\)/.test(raw) && !/\.arc:focus-visible \.arc-vis/.test(raw), 'a11y: a focused donut arc gets a --text ring, not just a recolour');
   ok(Object.keys(dark).filter((k) => k.startsWith('cat-')).length === 15, 'theme: a --cat-* colour for each of the 15 default categories');
 }
 
@@ -559,7 +571,7 @@ function R2(date, name) { return { id: date + name, date, total: 50, store: 'FAK
   ok(F.arcAt(lay, 100, 20) === 0 && F.arcAt(lay, 180, 100) === 1 && F.arcAt(lay, 99, 20) === 9, 'donut: dragging finds the arc under the finger (top = first, right = second, just left of top = last)');
   ok(F.dash(lay[1]).offset === (-lay[1].start * F.DONUT.C).toFixed(2), 'donut: the dash offset puts an arc at its start angle');
   ok(F.meterFraction(312, 500) === 0.624 && F.meterFraction(900, 500) === 1 && F.meterFraction(0, 500) === 0 && F.meterFraction(10, 0) === 0, 'meter: fill fraction, capped at the goal');
-  ok(F.goalAfterDrag(500, 32) === 600 && F.goalAfterDrag(500, -10000) === 50 && F.goalAfterDrag(500, 1e6) === 20000 && F.goalAfterDrag(500, 5) === 500, 'meter: dragging moves the goal in steps of 50 kr within 50–20 000');
+  ok(F.meterScale(312, 500) === 650 && F.meterScale(900, 500) === 1150 && F.meterScale(0, 50) === 100 && F.goalAt(0.8, 650) === 500 && F.goalAt(1, 650) === 650 && F.goalAt(-1, 650) === 50 && F.goalAt(0.83, 650) === 550 && F.goalAt(1, 1e6) === 20000, 'meter: dragging moves the goal in steps of 50 kr within 50–20 000');
   const offers = [0.1, 0.5, 0.25, 0.4, 0.35].map((d, i) => ({ o: { id: 'FAKE-' + i, d } }));
   ok([...F.bestOfferIds(offers, (o) => o.d)].join() === 'FAKE-1,FAKE-3,FAKE-4', 'tilbud: the best three by discount get the glowing edge');
   ok(F.bestOfferIds(offers, () => 0.1).size === 0, 'tilbud: no glow when nothing is a real deal (< 20 %)');
