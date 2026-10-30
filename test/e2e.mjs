@@ -946,7 +946,7 @@ async function cloudTests() {
       check(await evaluate(`return /Tilkoblet/.test(document.querySelector('[data-conn="trumf"]').textContent) && !!document.querySelector('[data-disconnect="trumf"]') && !!document.querySelector('[data-connect="rema"]');`), 'connect: Mer shows Trumf connected, REMA not');
       check(!supa.log.some((r) => /chain_connections\?select=[^&]*secret/.test(r.path)), 'connect: the app never asks for the secret');
       await click('[data-connect="rema"]');
-      check(await waitFor(`/Gjøres fra Mac-en/.test(document.querySelector('#rema-state')?.textContent || '') && /reCAPTCHA/.test(document.querySelector('#chain-connect').textContent)`, 5000), 'connect: "Koble til" for REMA opens Mer → Kjeder, which explains it is done on the Mac (no bypassing reCAPTCHA)');
+      check(await waitFor(`/Gjøres fra Mac-en/.test(document.querySelector('#rema-state')?.textContent || '') && /kobles til fra en Mac én gang\. Etterpå kommer kvitteringene av seg selv/.test(document.querySelector('#chain-connect').textContent) && !/reCAPTCHA|Mer → Kjeder/.test(document.querySelector('#chain-connect').textContent) && !!document.querySelector('#chain-connect [data-action="send-mac-link"]')`, 5000), 'connect: "Koble til" for REMA opens Mer → Kjeder, which explains it is done on the Mac (no bypassing reCAPTCHA)');
       await merPage('konto');
       await waitFor(`document.querySelector('[data-disconnect="trumf"]')`, 5000);
       await click('[data-disconnect="trumf"]');
@@ -1045,8 +1045,11 @@ try {
   fixtureCheck(/^2 av \d+/.test(coverage), 'mer: shows share of offers with barcode', coverage);
   await shot('03-mer-synk');
 
-  // 4. Backup never contains the token
+  // 4. Backup never contains the token (kunde 5: backup has its own page, out of "personvern")
   await merPage('personvern');
+  const pv = await evaluate(`return document.querySelector('#more-body').textContent;`);
+  check(/Hva hentes\?/.test(pv) && /Hvor lagres det\?/.test(pv) && /Hvordan kobler jeg fra\?/.test(pv) && !/Sikkerhetskopi|GitHub|sync\.sh|nøkkel/i.test(pv), 'kunde 5: «Hva skjer med dataene mine?» in plain words, no backup or GitHub details', pv.match(/Sikkerhetskopi|GitHub|sync\.sh|nøkkel/i)?.[0] || '');
+  await merPage('backup');
   const backup = await evaluate(`
     let blob; const orig = URL.createObjectURL; URL.createObjectURL = (b) => { blob = b; return orig(b); };
     const canShare = navigator.canShare; navigator.canShare = undefined; // force the download path so the blob can be read
@@ -1327,7 +1330,7 @@ try {
   // Mer: grouped list, plain words, your data, bigger text, danger zone with confirmation
   await tab('mer');
   const root = await evaluate(`return document.querySelector('#more-body').textContent;`);
-  check(/Dine opplysninger/.test(root) && !/backup|synk|\bEAN\b|JSON|GitHub/i.test(root), 'r4 mer: plain Norwegian on the main list (no backup/synk/EAN/JSON/GitHub)', root.match(/backup|synk|\bEAN\b|JSON|GitHub/i)?.[0] || '');
+  check(/Hva skjer med dataene mine\?/.test(root) && /Sikkerhetskopi og import/.test(root) && /Avansert \(for utviklere\)/.test(root) && !/backup|synk|\bEAN\b|JSON|GitHub/i.test(root), 'r4 mer: plain Norwegian on the main list (no backup/synk/EAN/JSON/GitHub)', root.match(/backup|synk|\bEAN\b|JSON|GitHub/i)?.[0] || '');
   check(await evaluate(`return document.querySelectorAll('#more-body .set-row').length >= 8;`), 'r4 mer: grouped rows with subpages');
   await evaluate(`const s = document.querySelector('[data-textsize-select]'); s.value = 'stor'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
   const bigText = await evaluate(`return { on: document.documentElement.classList.contains('big-text'), fs: parseFloat(getComputedStyle(document.documentElement).fontSize) };`);

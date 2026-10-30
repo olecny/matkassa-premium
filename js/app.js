@@ -1532,7 +1532,7 @@ async function copyFromOriginal() {
 /* ---------- Mer: a grouped settings list with subpages (plain Norwegian; technical things under Avansert) ---------- */
 const MORE_PAGES = {
   omrade: 'Område', kjeder: 'Kjeder', budsjett: 'Budsjett', kvitteringer: 'Kvitteringer', kategorier: 'Kategorier',
-  konto: 'Konto', personvern: 'Personvern og sletting', avansert: 'Avansert', om: 'Om Matkassa',
+  konto: 'Konto', personvern: 'Hva skjer med dataene mine?', backup: 'Sikkerhetskopi og import', avansert: 'Avansert (for utviklere)', om: 'Om Matkassa',
 };
 const ICONS = {
   omrade: '<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
@@ -1542,6 +1542,7 @@ const ICONS = {
   kategorier: '<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/>',
   konto: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   personvern: '<path d="M12 3 4.5 6v6c0 4.5 3.2 7.7 7.5 9 4.3-1.3 7.5-4.5 7.5-9V6z"/><path d="m9 12 2 2 4-4"/>',
+  backup: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/>',
   avansert: '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
   om: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/>',
   tekst: '<path d="M4 18 9 6l5 12M5.8 14h6.4M15 18l3-7 3 7M15.8 16h4.4"/>',
@@ -1554,10 +1555,10 @@ const toggleRow = (key, ic, label, sub) => `<li><label class="set-row switch-row
   <input type="checkbox" role="switch" data-setting="${key}" ${state.settings[key] ? 'checked' : ''}></label></li>`;
 
 const YOUR_DATA = [
-  ['Hva lagres?', 'Handlelisten, kvitteringene du henter inn, kategoriene dine og innstillingene.'],
-  ['Hvor?', 'Bare her på telefonen, i nettleseren. Du trenger ingen konto.'],
-  ['Hvem ser det?', 'Bare du. Tilbudene hentes uten noe om deg, bare for området du har valgt.'],
-  ['Hvordan sletter jeg?', 'Under Personvern og sletting kan du slette kvitteringene eller alt sammen.'],
+  ['Hva hentes?', 'Ukens tilbud, uten noe om deg. Og kvitteringene du selv henter inn: fra en fil, eller fra REMA via Mac-en hvis du kobler til.'],
+  ['Hvor lagres det?', 'Bare her på telefonen. Lager du en konto (valgfritt), også i din egen konto i skyen, som bare du kan se.'],
+  ['Hvem ser det?', 'Bare du. Ingen reklame, og ingenting selges videre.'],
+  ['Hvordan kobler jeg fra?', 'Under Kjeder trykker du «Koble fra» på REMA. Nederst her kan du slette kvitteringene eller alt sammen.'],
 ];
 
 function renderMore() {
@@ -1571,17 +1572,14 @@ function renderMore() {
 function moreRoot() {
   const known = state.offersData ? knownChains() : [];
   const shown = known.filter((c) => !hiddenChains().has(c.id)).length;
-  return `<div class="card your-data" id="your-data"><h2>Dine opplysninger</h2>
-      <dl>${YOUR_DATA.map(([q, a]) => `<dt>${q}</dt><dd>${a}</dd>`).join('')}</dl>
-      <button type="button" class="linkish" data-morepage="personvern">Les mer, ta sikkerhetskopi eller slett</button></div>
-    <ul class="settings">${row('omrade', 'Område', area().name)}${row('kjeder', 'Kjeder', known.length ? `${shown} av ${known.length}` : '')}${row('budsjett', 'Budsjett', state.settings.budget ? `${krShort(state.settings.budget)} i måneden` : 'Ikke satt')}</ul>
+  return `<ul class="settings">${row('omrade', 'Område', area().name)}${row('kjeder', 'Kjeder', known.length ? `${shown} av ${known.length}` : '')}${row('budsjett', 'Budsjett', state.settings.budget ? `${krShort(state.settings.budget)} i måneden` : 'Ikke satt')}</ul>
     <ul class="settings">${row('kvitteringer', 'Kvitteringer', String(state.receipts.length))}${row('kategorier', 'Kategorier', String(state.categories.length))}</ul>
     <ul class="settings"><li><label class="set-row">${icon('tema')}<span class="lbl">Tema</span>
       <select class="set-select" data-theme-select>${[['auto', 'Som telefonen'], ['dark', 'Mørkt'], ['light', 'Lyst']].map(([v, l]) => `<option value="${v}"${(state.settings.theme || 'auto') === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label></li>
       <li><label class="set-row">${icon('tekst')}<span class="lbl">Tekststørrelse</span>
       <select class="set-select" data-textsize-select>${[['normal', 'Normal'], ['stor', 'Stor'], ['xstor', 'Ekstra stor']].map(([v, l]) => `<option value="${v}"${(state.settings.textSize || 'normal') === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label></li>
       ${toggleRow('calm', 'tema', 'Rolig visning', 'Ingen glød eller vipping, mykere blåfarge')}${toggleRow('foodOnly', 'mat', 'Kun mat i tilbudene', 'Skjuler blomster, klær, dyremat og husholdning')}</ul>
-    <ul class="settings">${cloud ? row('konto', 'Konto', cloud.user ? 'Logget inn' : 'Valgfritt') : ''}${row('personvern', 'Personvern og sletting')}${row('avansert', 'Avansert (for viderekomne)')}${row('om', 'Om Matkassa', APP_VERSION)}</ul>`;
+    <ul class="settings">${cloud ? row('konto', 'Konto', cloud.user ? 'Logget inn' : 'Valgfritt') : ''}${row('personvern', 'Hva skjer med dataene mine?')}${row('backup', 'Sikkerhetskopi og import')}${row('avansert', 'Avansert (for utviklere)')}${row('om', 'Om Matkassa', APP_VERSION)}</ul>`;
 }
 
 const MORE_RENDER = {
@@ -1620,15 +1618,15 @@ const MORE_RENDER = {
       ${rules.length ? `<ul class="rules">${rules.map((r) => `<li><span>${r.type === 'ean' ? 'Strekkode' : 'Navn med'} «${esc(r.pattern)}» → ${esc(catById(r.categoryId) ? catById(r.categoryId).name : '(slettet kategori)')}</span><button class="btn small btn-ghost" type="button" data-ruledel="${esc(r.id)}" aria-label="Slett regelen for ${esc(r.pattern)}">Slett</button></li>`).join('')}</ul>` : '<p class="hint">Ingen egne regler ennå. En regel lages når du velger kategori for en vare under Forbruk, og gjelder da alle like varer, også i tilbudene.</p>'}</div>`;
   },
   konto: () => accountCard(),
-  personvern: () => `<div class="card your-data"><h2>Dine opplysninger</h2><dl>${YOUR_DATA.slice(0, 3).map(([q, a]) => `<dt>${q}</dt><dd>${a}</dd>`).join('')}</dl>
+  personvern: () => `<div class="card your-data"><h2>Hva skjer med dataene mine?</h2><dl>${YOUR_DATA.map(([q, a]) => `<dt>${q}</dt><dd>${a}</dd>`).join('')}</dl>
       <dl class="kv"><dt>Kvitteringer</dt><dd>${state.receipts.length}</dd><dt>Varer i listen</dt><dd>${state.list.length}</dd><dt>Egne regler</dt><dd>${state.rules.length}</dd></dl></div>
-    <div class="card"><h2>Sikkerhetskopi</h2>
-      <p class="hint" style="margin-top:0">${state.persisted ? 'Telefonen har lovet å ta vare på dataene. En sikkerhetskopi er likevel lurt hvis du bytter telefon.' : 'Telefonen kan rydde bort data fra nettsider du ikke har brukt på en stund. Lag en sikkerhetskopi av og til, så mister du ingenting.'}</p>
-      <div class="actions"><button class="btn" type="button" data-action="export">Lag sikkerhetskopi</button><button class="btn" type="button" data-action="import">Hent inn sikkerhetskopi</button></div></div>
     <div class="card danger-zone"><h2>Slett</h2>
       <p class="hint" style="margin-top:0">Du får spørsmål før noe slettes. Det kan ikke angres.</p>
       <div class="actions"><button class="btn btn-danger" type="button" data-action="wipe-spending">Slett alle kvitteringer</button>
       <button class="btn btn-danger" type="button" data-action="wipe-all">Slett alt på denne telefonen</button></div></div>`,
+  backup: () => `<div class="card"><h2>Sikkerhetskopi</h2>
+      <p class="hint" style="margin-top:0">${state.persisted ? 'Telefonen har lovet å ta vare på dataene. En sikkerhetskopi er likevel lurt hvis du bytter telefon.' : 'Telefonen kan rydde bort data fra nettsider du ikke har brukt på en stund. Lag en sikkerhetskopi av og til, så mister du ingenting.'}</p>
+      <div class="actions"><button class="btn" type="button" data-action="export">Lag sikkerhetskopi</button><button class="btn" type="button" data-action="import">Hent inn sikkerhetskopi</button></div></div>`,
   avansert: () => {
     const d = state.offersData;
     return `<p class="hint">For deg som henter kvitteringer fra REMA 1000 eller Trumf med et skript på Mac-en. Alt her er valgfritt.</p>
@@ -1825,9 +1823,18 @@ function accountCard() {
 
 const CONNECT_HELP = {
   trumf: 'Trumf kan ikke kobles til inne i appen: innloggingen (telefon, passord og SMS-kode) skjer bare på trumf.no, og Trumf har ingen innlogging for andre apper. Gjør det i stedet én gang på Mac-en: kjør «node ingest/trumf-login.mjs», logg inn hos Trumf i vinduet som åpnes, og lukk det. Deretter hentes kvitteringene hver søndag.',
-  rema: 'REMA kobles til fra Matkassa på Mac-en: Mer → Kjeder → Koble til REMA. Du logger inn hos REMA selv, i REMAs eget innloggingsvindu, og kvitteringene hentes deretter. På telefonen kan det ikke gjøres, fordi REMAs innlogging er beskyttet med reCAPTCHA, og det omgår vi ikke.',
+  rema: 'REMA kobles til fra en Mac én gang: åpne Matkassa der og trykk «Koble til REMA». Du logger inn hos REMA selv, i REMAs eget vindu, og passordet ditt lagres ikke hos oss. Etterpå kommer kvitteringene av seg selv.',
   coop: 'Coop har ingen åpen eller dokumentert måte å hente egne kvitteringer på. Bestill innsyn i stedet: coop.no → Min side → Bestill innsyn. Når du får fila, hent den inn under Mer → Kvitteringer.',
 };
+
+/* "Send lenke til Mac-en" (REMA on a phone): the share sheet, else copy the link. Nothing is sent by us. */
+async function sendMacLink() {
+  const url = location.origin + location.pathname;
+  const text = 'Åpne Matkassa på Mac-en for å koble til REMA (én gang):';
+  try { if (navigator.share) { await navigator.share({ title: 'Matkassa – koble til REMA', text, url }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(`${text} ${url}`); toast('Lenken er kopiert. Lim den inn i en melding eller e-post til deg selv.'); } catch { toast(url); }
+}
+document.addEventListener('click', (e) => { if (e.target.closest('[data-action="send-mac-link"]')) sendMacLink(); });
 
 /* ---------- Koble til REMA (Mer → Kjeder). The login provider (Mac helper today, an iOS app later) is chosen in
    js/chains/index.js; this part only shows the status and calls the connection's actions. ---------- */
@@ -1869,7 +1876,8 @@ function chainCard() {
   let body = '';
   if (s.state === STATES.UNSUPPORTED) {
     const c = (cloudState.connections || []).find((x) => x.chain === 'rema');
-    body = `<p class="hint">REMA kobles til fra Matkassa på Mac-en (Mer → Kjeder). REMAs innlogging er beskyttet med reCAPTCHA og må skje i nettleseren der, og det omgår vi ikke. Kvitteringene kommer så hit via kontoen din eller synken fra Mac-en.</p>
+    body = `<p class="hint">REMA kobles til fra en Mac én gang. Etterpå kommer kvitteringene av seg selv.</p>
+      <div class="actions"><button class="btn small" type="button" data-action="send-mac-link">Send lenke til Mac-en</button></div>
       ${c ? `<p class="hint">Koblet via Mac-en${c.last_fetch_at ? ` · hentet ${esc(timeFmt.format(new Date(c.last_fetch_at)))}` : ''}</p>` : ''}`;
   } else if (s.state === STATES.NOT_INSTALLED) {
     body = `<p class="hint">For å koble til REMA trenger Mac-en en liten hjelper som bare denne Mac-en kan nå. Slik installerer du den (én gang):</p>
