@@ -935,7 +935,7 @@ html.big-text input, html.big-text select, html.big-text textarea { font-size: 1
   .tab-indicator { transition: none; }
   .home-card:active, .home-feat a:active { transform: none; }
   .qty button:active, .start-steps button:active, .switch-row input::after, .swipe-bg span { transform: none; }
-  .switch-row input:checked::after { transform: translateX(20px); }
+  .switch-row input:checked::after { transform: translateX(1.2rem); }
   .sk-card i, .sk-card b { animation: none; }
   .home-enter > * { animation-name: home-fade; animation-duration: 200ms; }
   @keyframes home-fade { from { opacity: 0; } }
@@ -973,3 +973,50 @@ html.big-text input, html.big-text select, html.big-text textarea { font-size: 1
 
 /* a long word or URL in a message (e.g. a sync error) never pushes the page sideways (Maria B7) */
 .hint, .chain-conn-text, .chain-conn-text small, .toast { overflow-wrap: anywhere; }
+
+/* Tilbud: filters behind one button (Arne), chain chips wrap instead of scrolling sideways (Linn) */
+.filters { margin: 10px 0 2px; }
+.filters > summary { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 14px; border-radius: 12px; background: var(--fill); color: var(--text); cursor: pointer; list-style: none; }
+.filters > summary::-webkit-details-marker { display: none; }
+.filters-label { font-weight: 650; color: var(--accent); flex: none; }
+.filters-sum { min-width: 0; color: var(--text-2); font-size: .875rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filters[open] .filters-sum { white-space: normal; }
+.filters .chips, .where-card .chips { flex-wrap: wrap; overflow: visible; -webkit-mask-image: none; mask-image: none; margin: 0; padding: 10px 0 2px; }
+.where-card h2 { margin-top: 0; }
+
+/* Arne r2: the unit price is never read as a second price: its own smaller line */
+.fu, .priceblock .unit { display: block; font-size: .8125rem; font-weight: 500; color: var(--text-2); white-space: nowrap; }
+/* amounts never break in the middle, and Hjem fits 320 px */
+.price, .fp, .lv, .dc-value, .save-v, .home-feat .fp, .budget b, .krs { white-space: nowrap; }
+#view-hjem, #home-body { max-width: 100%; overflow-x: clip; }
+#home-body .card, .home-feat { min-width: 0; }
+/* Mer: selects and switches are ≥ 44 px and grow with Tekststørrelse (Arne r2) */
+.set-select { min-height: 44px; font-size: max(16px, 1rem); }
+.switch-row input { width: 3.2rem; height: 2rem; }
+.switch-row input::after { width: calc(2rem - 4px); height: calc(2rem - 4px); }
+.switch-row input:checked::after { transform: translateX(1.2rem); }
+.switch-row input::before { content: ""; position: absolute; inset: max(-6px, calc((2rem - 44px) / 2)) -4px; }
+
+/* Jonas r2: «For deg» top three: a cyan edge glow and a «Beste match» label (no glow with reduced motion or Rolig visning) */
+.feat.top, .home-feat li.top a { box-shadow: 0 0 0 1.5px var(--accent), 0 0 18px color-mix(in srgb, var(--accent) 42%, transparent); }
+.home-feat li.top a { position: relative; }
+.match-badge { justify-self: start; display: inline-block; font-size: .8125rem; font-weight: 700; letter-spacing: .02em; line-height: 1.2;
+  padding: 2px 7px; border-radius: 999px; color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+html.calm .feat.top, html.calm .home-feat li.top a { box-shadow: 0 0 0 1.5px var(--accent); }
+@media (prefers-reduced-motion: reduce) { .feat.top, .home-feat li.top a { box-shadow: 0 0 0 1.5px var(--accent); } }
+
+/* Jonas r2: one colour system: the meter is neon (the accent), orange is kept for «spar» badges */
+.meter-fill { background: linear-gradient(90deg, var(--accent-2), var(--accent)); }
+.meter-glow { box-shadow: var(--glow); }
+.meter-pending { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 50%, transparent) 0 5px, transparent 5px 10px); }
+.save-done { color: var(--accent); }
+/* «Mål nådd»: a stronger glow pulse (never with reduced motion or Rolig visning) */
+.meter.pulse .meter-glow { animation: meter-pulse-2 600ms var(--ease-in-out) 700ms 2; }
+@keyframes meter-pulse-2 { 50% { opacity: 1; box-shadow: 0 0 4px var(--accent), 0 0 40px var(--accent), 0 0 70px color-mix(in srgb, var(--accent) 50%, transparent); } }
+.save-card.goal-hit .save-v { animation: goal-pop 600ms var(--ease-out) 700ms 1; }
+@keyframes goal-pop { 40% { text-shadow: 0 0 18px var(--accent); } }
+html.calm .meter.pulse .meter-glow, html.calm .save-card.goal-hit .save-v { animation: none; }
+@media (prefers-reduced-motion: reduce) { .meter.pulse .meter-glow, .save-card.goal-hit .save-v { animation: none !important; } }
+
+/* Jonas r2: a finger that starts on the ring drags round it instead of scrolling the page */
+.donut .arc { touch-action: none; }

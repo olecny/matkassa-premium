@@ -60,8 +60,13 @@
           </select>
         </label>
       </div>
-      <div class="chips" id="chain-chips" role="group" aria-label="Filtrer på kjede"></div>
-      <div class="chips" id="cat-chips" role="group" aria-label="Filtrer på kategori"></div>
+      <div id="where-card" class="card where-card" hidden></div>
+      <!-- Filters behind one button with a one-line summary (Arne: at Ekstra stor the chips filled ~13 rows) -->
+      <details class="filters" id="offer-filters">
+        <summary><span class="filters-label">Filter</span><span id="filter-sum" class="filters-sum"></span></summary>
+        <div class="chips" id="chain-chips" role="group" aria-label="Filtrer på kjede"></div>
+        <div class="chips" id="cat-chips" role="group" aria-label="Filtrer på kategori"></div>
+      </details>
       <section id="for-deg" class="for-deg" hidden aria-labelledby="for-deg-h">
         <h2 id="for-deg-h">Tilbud for deg</h2>
         <ul id="for-deg-list"></ul>
@@ -210,7 +215,7 @@
     <form method="dialog">
       <h2 id="connect-h">Koble til kjeden</h2>
       <p id="connect-text"></p>
-      <div class="dlg-actions"><button class="btn btn-primary" value="ok">Lukk</button></div>
+      <div class="dlg-actions"><button class="btn btn-primary" value="ok">Skjønner</button></div>
     </form>
   </dialog>
 

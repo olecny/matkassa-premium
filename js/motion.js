@@ -119,10 +119,10 @@ export function exitRow(el) {
   ).finished.catch(() => {});
 }
 
-/** A short buzz where the device can (Android; iOS Safari ignores it). Never with reduced motion. */
+/** A short buzz where the device can (Android; iOS Safari ignores it). Never with reduced motion or Rolig visning. */
 export function haptic(ms = 8) {
   // only after the user has touched the page (browsers block it before, with a console warning)
-  try { if (!reducedMotion() && navigator.vibrate && (!navigator.userActivation || navigator.userActivation.hasBeenActive)) navigator.vibrate(ms); } catch (e) { /* not allowed here */ }
+  try { if (!reducedMotion() && !document.documentElement.classList.contains('calm') && navigator.vibrate && (!navigator.userActivation || navigator.userActivation.hasBeenActive)) navigator.vibrate(ms); } catch (e) { /* not allowed here */ }
 }
 
 // Overshoots a little and settles: the row springs back like a native list cell.

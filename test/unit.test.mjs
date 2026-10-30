@@ -701,4 +701,17 @@ function R2(date, name) { return { id: date + name, date, total: 50, store: 'FAK
   ok(/SEARCH_HEADS = \['melk'/.test(app) && /Ingen «\$\{state\.q\}» på tilbud nå/.test(app), 'Hege r2: «helmelk» with no helmelk on offer falls back to the melk group, and says so');
   ok(/const dealPrice = \(o\) => \(o\.multi && o\.perPiece/.test(app) && /\$\{o\.multi\.payFor\} · \$\{kr\(o\.price\)\}\/stk/.test(app), 'Maria M1: «3 for 2 · 59,90 kr/stk», and the % is the real deal');
 }
+{ // round 2: Linn, Arne, Jonas source rules
+  const app = fs.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const mot = fs.readFileSync(new URL('../js/motion.js', import.meta.url), 'utf8');
+  const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const cssR = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  ok((html.match(/>Lukk</g) || []).length === 1, 'Linn r2: only one «Lukk» button in the page (the connect sheet says «Skjønner»)');
+  ok(/tilbud til \$\{moreChains\(deals\)\}/.test(app) && /names\.slice\(0, 3\)\.join\(', '\)/.test(app), 'Linn r2: «+ 2 tilbud til (MENY, Kiwi)»');
+  ok(/classList\.contains\('calm'\) && navigator\.vibrate/.test(mot) && /!reducedMotion\(\)/.test(mot), 'Jonas r2: haptic() never buzzes with reduced motion or Rolig visning');
+  ok(/haptic\(10\); drag\.dragged/.test(app) && /setGoal\(state\.settings\.saveGoal, true\); haptic\(10\)/.test(app) && /haptic\(done \? 12 : 6\)/.test(app) && /!reduce && !calmOn\(\)\) \{ meter\.classList\.add\('pulse'\)/.test(app), 'Jonas r2: haptics on goal reached, tick-off and drag end; the goal pulse skips reduced motion and Rolig visning');
+  ok(/\.donut \.arc \{ touch-action: none; \}/.test(cssR) && /\.donut \{[^}]*touch-action: pan-y/.test(cssR), 'Jonas r2: touch-action none on the ring arcs only');
+  ok(/html\.calm \.feat\.top/.test(cssR) && /prefers-reduced-motion: reduce\) \{ \.feat\.top/.test(cssR) && /Beste match/.test(app), 'Jonas r2: «Beste match» top 3, without glow under reduced motion and Rolig visning');
+  ok(/\.set-select \{ min-height: 44px/.test(cssR) && /\.switch-row input \{ width: 3\.2rem; height: 2rem; \}/.test(cssR), 'Arne r2: Mer selects ≥ 44 px, switches sized in rem (grow with text size)');
+}
 console.log(failed ? `\n${failed} FAILED` : '\nAll unit tests passed');

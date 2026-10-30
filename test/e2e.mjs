@@ -540,6 +540,19 @@ async function v07Shot(name) {
 const ptr = (sel, type, x, y, idx = 0) => evaluate(`const el = document.querySelectorAll(${JSON.stringify(sel)})[${idx}]; const r = el.getBoundingClientRect();
   el.dispatchEvent(new PointerEvent(${JSON.stringify(type)}, { bubbles: true, pointerId: 7, pointerType: 'touch', isPrimary: true, clientX: r.left + ${x}, clientY: r.top + ${y} })); return true;`);
 const scaleX = (sel) => evaluate(`const t = getComputedStyle(document.querySelector(${JSON.stringify(sel)})).transform; const m = /matrix\\(([^,]+)/.exec(t); return m ? Number(m[1]) : (t === 'none' ? 1 : NaN);`);
+async function whereTests() {
+  // Linn r2: the first time, Tilbud asks "Hvor handler du?"; only the picked chains are shown afterwards
+  await inFreshContext('where', async () => {
+    await navigate(BASE + 'index.html#tilbud');
+    check(await waitFor(`!document.querySelector('#where-card').hidden && document.querySelectorAll('#where-card [data-where]').length >= 2`, 10000), 'Linn r2: first start asks «Hvor handler du?» with chain chips');
+    const rema = await evaluate(`const b = [...document.querySelectorAll('#where-card [data-where]')].find((x) => /REMA/.test(x.textContent)); b.click(); return b.dataset.where;`);
+    await click('[data-action="where-done"]');
+    await sleep(300);
+    const r = await evaluate(`return { hidden: document.querySelector('#where-card').hidden, chains: [...new Set([...document.querySelectorAll('#offer-list .offer .chain')].map((c) => c.textContent))] };`);
+    const st = await readSettings();
+    check(r.hidden && r.chains.length === 1 && /REMA/.test(r.chains[0]) && st.chainsSeen && !st.hiddenChains.includes(rema) && st.hiddenChains.length >= 1, 'Linn r2: a REMA-only shopper sees only REMA offers (no Bunnpris/KIWI), and is not asked again', JSON.stringify(r));
+  });
+}
 async function neonTests() {
   await inFreshContext('neon', async () => {
     await media('dark');
@@ -554,6 +567,16 @@ async function neonTests() {
     await tab('hjem');
     const zero = await evaluate(`return { note: document.querySelector('#home-save .save-note').textContent, hint: document.querySelector('#home-save .save-hint').textContent };`);
     check(/0 kr betyr bare at ingen tilbud er krysset av/.test(zero.note) && /Dra langs staven/.test(zero.hint), 'kunde 2: «0 kr spart» is explained in plain words, and the drag hint is visible', JSON.stringify(zero));
+    // Jonas r2: at 0 kr the meter says how many list items have a known regular price, and that offers without one do not count
+    await tab('tilbud');
+    const preId = await evaluate(`const o = [...document.querySelectorAll('#offer-list .offer')].find((x) => x.querySelector('.pre') && x.querySelector('[data-add]')); if (!o) return null; o.querySelector('[data-add]').click(); return o.querySelector('[data-add]').dataset.add;`);
+    await sleep(300);
+    await tab('hjem');
+    const kn = await evaluate(`return document.querySelector('#home-save .save-note').textContent;`);
+    fixtureCheck(preId && /1 vare på lista har kjent førpris/.test(kn) && /uten oppgitt førpris .*teller ikke/.test(kn), 'Jonas r2: at 0 kr the meter says «1 vare på lista har kjent førpris» and that offers without a regular price do not count', kn);
+    await evaluate(`const db = await new Promise((r) => { const q = indexedDB.open('${APP_DB}'); q.onsuccess = () => r(q.result); });
+      await new Promise((r) => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put([], 'list'); t.oncomplete = r; });
+      return true;`);
     await evaluate(`const db = await new Promise((r) => { const q = indexedDB.open('${APP_DB}'); q.onsuccess = () => r(q.result); });
       await new Promise((r) => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put([{ id: 'save-FAKE-1', at: Date.now(), kr: 212, text: 'TINE HELMELK (FAKE)' }, { id: 'save-FAKE-2', at: Date.now(), kr: 100, text: 'KYLLINGFILET (FAKE)' }], 'savings'); t.oncomplete = r; });
       return true;`);
@@ -568,7 +591,9 @@ async function neonTests() {
     const mk = await evaluate(`const row = document.querySelector('#home-save .save-row').getBoundingClientRect(); const h = document.querySelector('.save-handle'); const t = h.querySelector('.goal-tick').getBoundingClientRect(); const l = h.querySelector('.goal-label');
       return { label: l.textContent.trim(), x: (t.left + t.width / 2 - row.left) / row.width, onBar: t.top <= row.top + row.height / 2 && t.bottom >= row.top + row.height / 2, role: h.getAttribute('role'), name: h.getAttribute('aria-label'), vt: h.getAttribute('aria-valuetext') };`);
     check(mk.label === 'Mål 500 kr' && Math.abs(mk.x - 500 / 650) < 0.02 && mk.onBar && mk.role === 'slider' && /Sparemål/.test(mk.name) && mk.vt === 'Mål: 500 kroner', 'B1 meter: the goal is a labelled marker on the bar ("Mål 500 kr"), a named slider', JSON.stringify(mk));
-    check(await evaluate(`return getComputedStyle(document.querySelector('.meter-glow')).boxShadow !== 'none';`), 'neon meter: sale glow in dark');
+    check(await evaluate(`return getComputedStyle(document.querySelector('.meter-glow')).boxShadow !== 'none';`), 'neon meter: glow in dark');
+    const mcol = await evaluate(`return { fill: getComputedStyle(document.querySelector('.meter-fill')).backgroundImage, glow: getComputedStyle(document.querySelector('.meter-glow')).boxShadow };`);
+    check(/rgb\(0, 229, 255\)/.test(mcol.fill) && /rgb\(0, 229, 255\)|rgba\(0, 229, 255/.test(mcol.glow) && !/255, 154, 85/.test(mcol.fill + mcol.glow), 'Jonas r2: the meter fill and glow are neon (the accent), not orange', JSON.stringify(mcol));
     await click('#home-save .save-what');
     check(await evaluate(`return !document.querySelector('#save-list').hidden && /TINE HELMELK/.test(document.querySelector('#save-list').textContent);`), 'neon meter: tapping shows what the savings are made of');
     await click('#home-save .save-what');
@@ -643,6 +668,18 @@ async function neonTests() {
     await sleep(600);
     // kunde 4: the figures show that they can be touched, and a tap in the middle of the ring does something
     check(/Trykk på en farge/.test(await evaluate(`return document.querySelector('.donut-hint').textContent;`)), 'kunde 4: the donut says it can be tapped');
+    check(/dra fingeren rundt ringen/.test(await evaluate(`return document.querySelector('.donut-hint').textContent;`)), 'Jonas r2: the donut hint mentions dragging round the ring');
+    const ringTA = await evaluate(`return { arc: getComputedStyle(document.querySelector('.donut .arc')).touchAction, svg: getComputedStyle(document.querySelector('.donut')).touchAction };`);
+    check(ringTA.arc === 'none' && ringTA.svg === 'pan-y', 'Jonas r2: touch-action is none on the ring arcs only (the rest of the donut still scrolls)', JSON.stringify(ringTA));
+    const ring = await evaluate(`const s = document.querySelector('.donut'); const r = s.getBoundingClientRect(); const cx = r.left + r.width / 2, cy = r.top + r.height / 2, R = r.width * 80 / 200;
+      const at = (deg) => ({ x: cx + R * Math.sin(deg * Math.PI / 180), y: cy - R * Math.cos(deg * Math.PI / 180) });
+      const fire = (t, p, target) => (target || s).dispatchEvent(new PointerEvent(t, { bubbles: true, pointerId: 5, pointerType: 'touch', isPrimary: true, clientX: p.x, clientY: p.y }));
+      const p0 = at(80); fire('pointerdown', p0, document.elementFromPoint(p0.x, p0.y)); const seen = new Set();
+      for (let d = 85; d <= 200; d += 15) { fire('pointermove', at(d)); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); const g = document.querySelector('.donut .arc.sel'); if (g) seen.add(g.dataset.arc); }
+      fire('pointerup', at(200)); return [...seen];`);
+    check(ring.length >= 1, 'Jonas r2: a mostly vertical drag that starts on the ring moves round the categories instead of being dropped', ring.join());
+    await evaluate(`const a = document.querySelector('.donut .arc'); a.focus(); a.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); a.blur(); return true;`);
+    await sleep(100);
     const hub = async () => { await evaluate(`const s = document.querySelector('.donut'); const r = s.getBoundingClientRect(); s.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 })); return true;`); return evaluate(`const g = document.querySelector('.donut .arc.sel'); return g ? g.dataset.arc : '-';`); };
     const h1 = await hub(); const h2 = await hub();
     check(h1 === '0' && h2 === '1', 'kunde 4: tapping the middle of the donut steps through the categories', h1 + ',' + h2);
@@ -711,7 +748,16 @@ async function neonTests() {
     check(tabs.length === 5 && tabs.every((t) => !t.cut && t.fs >= 13) && tabs.some((t) => t.t === 'Liste'), 'kunde 3: at 320 px with Ekstra stor the tab names are never cut (≥ 13 px)', JSON.stringify(tabs));
     const rows = await evaluate(`return Math.min(...[...document.querySelectorAll('#view-mer .switch-row')].map((r) => r.getBoundingClientRect().height));`);
     check(rows >= 44, 'kunde 3: switch rows are ≥ 44 px tall (the whole row is the target)', rows);
+    const ctl = await evaluate(`const sel = [...document.querySelectorAll('#view-mer select')].filter((e) => e.offsetParent).map((e) => e.getBoundingClientRect().height); const sw = [...document.querySelectorAll('#view-mer .switch-row input')].filter((e) => e.offsetParent).map((e) => e.getBoundingClientRect().height + 2 * Math.abs(parseFloat(getComputedStyle(e, '::before').top) || 0)); return { sel: Math.min(...sel), sw: Math.min(...sw), n: sel.length + sw.length };`);
+    check(ctl.n && ctl.sel >= 44 && ctl.sw >= 44, 'Arne r2: Mer selects and switches (with their tap area) are ≥ 44 px at Ekstra stor', JSON.stringify(ctl));
+    await tab('hjem');
+    const hj = await evaluate(`const v = document.querySelector('#view-hjem'); const wide = [...v.querySelectorAll('*')].filter((e) => e.offsetParent && !e.closest('.home-feat ul') && e.getBoundingClientRect().right > innerWidth + 0.5).map((e) => e.className || e.tagName).slice(0, 5); return { sw: document.documentElement.scrollWidth, wide };`);
+    check(hj.sw <= 320 && !hj.wide.length, 'Arne r2: Hjem at 320 px with Ekstra stor is not wider than the screen', JSON.stringify(hj));
     await tab('tilbud');
+    // Arne r2: the filters sit behind one "Filter" button with a summary
+    const fs = await evaluate(`const d = document.querySelector('#offer-filters'); return { open: d.open, sum: document.querySelector('#filter-sum').textContent };`);
+    check(!fs.open && /Kun mat · alle kjeder/.test(fs.sum), 'Arne r2: the filters are closed behind «Filter» with a one-line summary', JSON.stringify(fs));
+    await evaluate(`document.querySelector('#offer-filters').open = true; return true;`);
     const chips = await evaluate(`return [...document.querySelectorAll('#view-tilbud .chip')].filter((c) => c.offsetParent).map((c) => Math.round(c.getBoundingClientRect().height));`);
     const pressed = await evaluate(`const c = document.querySelector('#view-tilbud .chip[aria-pressed="true"]'); const u = document.querySelector('#view-tilbud .chip[aria-pressed="false"]'); return { mark: getComputedStyle(c, '::before').content !== 'none', bgOn: getComputedStyle(c).backgroundColor, bgOff: getComputedStyle(u).backgroundColor };`);
     check(chips.length && Math.min(...chips) >= 44, 'kunde 3: filter chips are ≥ 44 px tall', chips.join());
@@ -1141,6 +1187,8 @@ try {
   fixtureCheck(home.badges > 0, 'hjem: list items on sale get an offer badge', `${home.badges} badges`);
   check(home.feat > 0 && home.feat <= 6, 'hjem: compact "Tilbud for deg" row once something is learned', `${home.feat}`);
   check(await noHScroll(), 'hjem with data: no horizontal scroll');
+  const top3 = await evaluate(`const li = [...document.querySelectorAll('.home-feat li')]; return { top: li.filter((x) => x.classList.contains('top')).length, badges: [...document.querySelectorAll('.home-feat .match-badge')].map((b) => b.textContent), firstTop: li[0]?.classList.contains('top'), shadow: li[0] ? getComputedStyle(li[0].querySelector('a')).boxShadow : '', tilbud: document.querySelectorAll('#for-deg-list .feat.top .match-badge').length };`);
+  check(top3.top === Math.min(3, home.feat) && top3.firstTop && top3.badges.every((t) => t === 'Beste match') && /1\.5px/.test(top3.shadow) && top3.tilbud >= 1 && top3.tilbud <= 3, 'Jonas r2: the «For deg» top 3 get a cyan glow edge and a «Beste match» label (Hjem and Tilbud)', JSON.stringify(top3));
   await a11yAudit('hjem-data');
   await shot('04b-hjem');
   await tab('tilbud');
@@ -1308,6 +1356,7 @@ try {
   await click('#paste-form button[value="cancel"]');
   await sleep(450);
   check(!(await evaluate(`return document.querySelector('#dlg-paste').open;`)), 'kunde 6: «Lukk» closes the paste sheet');
+  check((await evaluate(`return [...document.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Lukk').length;`)) === 1, 'Linn r2: only one «Lukk» button in the page (the paste sheet)');
   await click('[data-action="paste-list"]');
   await tab('mer');
   await sleep(200);
@@ -1322,7 +1371,7 @@ try {
   await sleep(300);
   check((await listTexts()).length === before2, 'kunde 6: Ukas basis twice does not add duplicates');
   const plus = await evaluate(`return [...document.querySelectorAll('#list-items .deal summary u')].map((u) => u.textContent);`);
-  fixtureCheck(plus.length > 0 && plus.every((t) => /^\+ \d+ tilbud til$/.test(t)), 'kunde 6: «+2» on an item now says «+ 2 tilbud til»', plus.join(' | '));
+  fixtureCheck(plus.length > 0 && plus.every((t) => /^\+ \d+ tilbud til \([A-ZÆØÅa-zæøå0-9 ,.-]+\)$/.test(t)), 'kunde 6 + Linn r2: «+2» says «+ 2 tilbud til (MENY, Kiwi)»', plus.join(' | '));
 
   // Hjem: budget and "Kom i gang"
   await merPage('budsjett');
@@ -1384,6 +1433,7 @@ try {
   await motionTests();
   await chainTests();
   await neonTests();
+  await whereTests();
 
   // 11. Offline: service worker serves the app shell, data stays
   check(await waitFor(`navigator.serviceWorker && navigator.serviceWorker.controller`, 15000) || (await navigate(BASE + 'index.html#tilbud'), await waitFor(`navigator.serviceWorker.controller`, 15000)), 'service worker controls the page');

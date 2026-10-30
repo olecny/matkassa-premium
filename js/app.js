@@ -207,7 +207,7 @@ function featuredOffers(n = 10) {
 // Enters from below and leaves the same way (styles.css .toast). The timer pauses while the app is hidden, so a
 // message isn't missed when the user switches away right after an action.
 const TOAST_MS = 2600;
-const toastMs = (msg) => Math.min(12000, Math.max(TOAST_MS, String(msg).length * 55)); // long messages stay readable
+const toastMs = (msg) => Math.min(6000, Math.max(TOAST_MS, String(msg).length * 55)); // long messages stay readable, but always go away (Arne r2)
 let toastTimer;
 let toastAction = null;
 /** Show a message; action = {label, run} adds a button (e.g. "Angre" after a delete). */
@@ -216,6 +216,9 @@ function toast(msg, action = null) {
   toastAction = action;
   t.innerHTML = `<span>${esc(msg)}</span>${action ? `<button type="button" class="toast-act">${esc(action.label)}</button>` : ''}`;
   t.classList.remove('leaving');
+  // always above the real tab bar, which grows with Ekstra stor text (Arne r2)
+  const bar = document.querySelector('.tabbar');
+  if (bar) t.style.bottom = `${Math.round(bar.getBoundingClientRect().height) + 12}px`;
   t.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(hideToast, toastMs(msg));
@@ -428,12 +431,14 @@ function offerCard({ o, fit, because, via }, best = false) {
   </li>`;
 }
 
-function featCard({ o, because, via }) {
+const MATCH_BADGE = '<span class="match-badge">Beste match</span>';
+function featCard({ o, because, via }, rank = 9) {
   const added = inList(o.id);
-  return `<li class="feat">
+  // Jonas r2: the top three are marked (glow edge + «Beste match»), so the personalisation reads as a feature
+  return `<li class="feat${rank < 3 ? ' top' : ''}">${rank < 3 ? MATCH_BADGE : ''}
     ${o.img ? `<img src="${esc(o.img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '<div class="noimg"></div>'}
     <div class="ft">${esc(titleCase(o.title))}</div>
-    <div class="fp">${priceText(o)}${o.unitPrice ? ` <small>${unitText(o)}</small>` : ''}${o.prePrice && o.prePrice > o.price ? ` <s>${kr(o.prePrice)}</s>` : ''}</div>
+    <div class="fp">${priceText(o)}${o.unitPrice ? ` <small class="fu">${unitText(o)}</small>` : ''}${o.prePrice && o.prePrice > o.price ? ` <s>${kr(o.prePrice)}</s>` : ''}</div>
     <div class="meta"><span class="chain" style="--c:${esc(chainColor(o.chainId, o.color))}">${esc(o.chain)}</span></div>
     <div class="why">${esc(because.name)} · ${because.n}×${via === 'ean' ? ' <span class="via" title="Samme strekkode som på kvitteringene dine">strekkode</span>' : ''}</div>
     <button class="add${added ? ' added' : ''}" type="button" data-add="${esc(o.id)}" aria-label="${added ? 'Ligger i handlelisten' : 'Legg til i handlelisten'}: ${esc(o.title)}"><svg class="i-plus" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><svg class="i-check" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
@@ -463,7 +468,41 @@ function renderChips() {
   $('#chain-chips').hidden = $('#cat-chips').hidden = !d;
 }
 
+/* "Hvor handler du?" the first time (Linn): pick your chains once; only those are shown afterwards. */
+function renderWhere() {
+  const el = $('#where-card');
+  const known = state.offersData ? knownChains() : [];
+  if (state.settings.chainsSeen || known.length < 2) { el.hidden = true; return; }
+  el.hidden = false;
+  if (el.dataset.ready) return;
+  el.dataset.ready = '1';
+  el.innerHTML = `<h2>Hvor handler du?</h2><p class="hint" style="margin-top:0">Velg butikkene dine, så viser vi bare tilbudene der. Du kan endre det senere under Mer → Kjeder.</p>
+    <div class="chips wrap" role="group" aria-label="Butikkene dine">${known.map((c) => `<button class="chip" type="button" data-where="${esc(c.id)}" aria-pressed="false"><span class="dot" style="--c:${esc(chainColor(c.id, c.color))}"></span>${esc(c.name)}</button>`).join('')}</div>
+    <div class="actions"><button class="btn btn-primary" type="button" data-action="where-done">Vis tilbudene</button><button class="btn btn-ghost" type="button" data-action="where-all">Alle butikker</button></div>`;
+}
+function finishWhere(all) {
+  const picked = new Set([...document.querySelectorAll('#where-card [data-where][aria-pressed="true"]')].map((b) => b.dataset.where));
+  if (!all && picked.size) state.settings.hiddenChains = knownChains().map((c) => c.id).filter((id) => !picked.has(id));
+  state.settings.chainsSeen = true;
+  save.settings();
+  $('#where-card').hidden = true;
+  renderOffers();
+  render();
+}
+/** "Kun mat · alle kjeder · Laveste pris" on the closed Filter button. */
+function renderFilterSum() {
+  const el = $('#filter-sum');
+  if (!el) return;
+  const chains = selectedChains();
+  const shown = knownChains().filter((c) => !hiddenChains().has(c.id));
+  const cs = chains.size ? shown.filter((c) => chains.has(c.id)).map((c) => c.name) : [];
+  const sortEl = $('#offer-sort');
+  el.textContent = [foodOnly() ? 'Kun mat' : 'Alle varer', cs.length ? (cs.length <= 2 ? cs.join(', ') : `${cs.length} kjeder`) : 'alle kjeder',
+    state.cat ? catName(state.cat) : null, sortEl ? sortEl.selectedOptions[0]?.textContent : null].filter(Boolean).join(' · ');
+}
 function renderOffers() {
+  renderWhere();
+  renderFilterSum();
   renderChips();
   const empty = $('#offer-empty');
   const listEl = $('#offer-list');
@@ -484,7 +523,7 @@ function renderOffers() {
   const list = filteredOffers();
   const feat = !state.q && !state.cat ? featuredOffers() : [];
   $('#for-deg').hidden = !feat.length;
-  $('#for-deg-list').innerHTML = feat.map(featCard).join('');
+  $('#for-deg-list').innerHTML = feat.map((f, i) => featCard(f, i)).join('');
   $('#offer-count').textContent = state.searchWider ? `Ingen «${state.q}» på tilbud nå · ${list.length} tilbud på ${state.searchWider}` : `${list.length} tilbud${state.q ? ` for «${state.q}»` : ''}`;
   const best = bestValueIds(list); // lowest kr/kg or kr/l among ≥ 3 comparable offers, not % off
   listEl.innerHTML = list.slice(0, state.shown).map((x) => offerCard(x, best.has(x.o.id))).join('');
@@ -607,6 +646,12 @@ function itemInfo(i) {
   return { linked, expired: !!(linked && linked.till && linked.till < now), deals, shown, cat };
 }
 
+/** Where the other offers are: "(MENY, Kiwi)", at most three chain names (Linn r2). */
+function moreChains(deals) {
+  const names = [...new Set(deals.slice(1).map((o) => o.chain).filter(Boolean))];
+  if (!names.length) return '';
+  return `(${esc(names.slice(0, 3).join(', '))}${names.length > 3 ? ' m.fl.' : ''})`;
+}
 function dealHTML(i, info) {
   const { linked, expired, deals, shown } = info;
   if (shown && shown.linked) {
@@ -619,7 +664,7 @@ function dealHTML(i, info) {
   const best = deals[0];
   const rest = deals.slice(0, 6);
   const again = linked && expired ? 'igjen ' : '';
-  return `<details class="deal"><summary><span class="deal-tag">På tilbud ${again}hos ${esc(best.chain)} · ${kr(best.price)}</span>${best.via === 'ean' ? '<span class="via" title="Samme strekkode">strekkode</span>' : ''}${deals.length > 1 ? `<u>+ ${deals.length - 1} ${deals.length - 1 === 1 ? 'tilbud' : 'tilbud'} til</u>` : ''}</summary>
+  return `<details class="deal"><summary><span class="deal-tag">På tilbud ${again}hos ${esc(best.chain)} · ${kr(best.price)}</span>${best.via === 'ean' ? '<span class="via" title="Samme strekkode">strekkode</span>' : ''}${deals.length > 1 ? `<u>+ ${deals.length - 1} tilbud til ${moreChains(deals)}</u>` : ''}</summary>
     <ul>${rest.map((o) => `<li><span class="dc">${esc(o.chain)}</span><span class="dt">${esc(titleCase(o.title))}${o.unitPrice ? `<small>${unitText(o)}</small>` : ''}</span><b>${kr(o.price)}</b></li>`).join('')}</ul></details>`;
 }
 
@@ -878,7 +923,7 @@ function renderHome() {
   const feat = featuredOffers(6);
   if (feat.length) {
     parts.push(`<section class="home-feat" aria-labelledby="home-feat-h"><h2 id="home-feat-h">Tilbud for deg</h2>
-      <ul>${feat.map(({ o, because }) => `<li><a href="#tilbud" data-gototab="tilbud">${o.img ? `<img src="${esc(o.img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '<span class="noimg"></span>'}
+      <ul>${feat.map(({ o, because }, rank) => `<li${rank < 3 ? ' class="top"' : ''}><a href="#tilbud" data-gototab="tilbud">${rank < 3 ? MATCH_BADGE : ''}${o.img ? `<img src="${esc(o.img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '<span class="noimg"></span>'}
         <span class="ft">${esc(titleCase(o.title))}</span><span class="fp">${priceText(o)}${o.unitPrice ? ` <small class="fu">${unitText(o)}</small>` : ''}${discount(o) >= 0.05 ? ` <span class="off">−${Math.round(discount(o) * 100)} %</span>` : ''}</span><span class="chain" style="--c:${esc(chainColor(o.chainId, o.color))}">${esc(o.chain)}</span>
         <span class="why">Du kjøper ${esc(because.name.toLowerCase())}</span></a></li>`).join('')}</ul>${WHY_FOR_YOU}</section>`);
   }
@@ -887,6 +932,7 @@ function renderHome() {
 }
 
 /* ---------- Hjem: the savings meter (DESIGN.md v0.7 § 3b) ---------- */
+const calmOn = () => document.documentElement.classList.contains('calm');
 let meterShownP = null; // last fill shown this session (null = first view: fill from 0)
 const meterPulsed = new Set(); // months whose "goal reached" pulse has played
 const goalText = (g) => `av ${krShort(g)} mål denne måneden`;
@@ -900,7 +946,15 @@ function saveNote(saved, pending, goal) {
   const parts = [];
   if (saved >= goal) parts.push('<b class="save-done">Mål nådd!</b> Godt handlet.');
   if (pending > 0) parts.push(`+ ${krShort(pending)} på vei: tilbud i handlelisten som ikke er krysset av ennå.`);
-  if (!saved && !pending) parts.push('0 kr betyr bare at ingen tilbud er krysset av ennå. Legg et tilbud i handlelisten og kryss det av når du har kjøpt det, så legges det du sparer mot vanlig pris til her.');
+  if (!saved) {
+    // Jonas r2: say what can count, not only why it is 0
+    const known = state.list.filter((i) => !i.done && savingFor(i) > 0).length;
+    const shownNoPre = state.list.filter((i) => !i.done && itemInfo(i).shown && !savingFor(i)).length;
+    if (known) parts.push(`${known === 1 ? '1 vare' : `${known} varer`} på lista har kjent førpris. Kryss ${known === 1 ? 'den' : 'dem'} av når du har kjøpt ${known === 1 ? 'den' : 'dem'}, så telles det du sparer her.`);
+    else if (!pending) parts.push('0 kr betyr bare at ingen tilbud er krysset av ennå. Legg et tilbud i handlelisten og kryss det av når du har kjøpt det, så legges det du sparer mot vanlig pris til her.');
+    if (shownNoPre) parts.push(`Tilbud uten oppgitt førpris (${shownNoPre} på lista) teller ikke.`);
+    else if (known) parts.push('Tilbud uten oppgitt førpris teller ikke.');
+  }
   if (noPre) parts.push(`${noPre === 1 ? 'Ett avkrysset tilbud' : `${noPre} avkryssede tilbud`} oppga ikke vanlig pris, så ${noPre === 1 ? 'det' : 'de'} kan ikke regnes med.`);
   return parts.join(' ');
 }
@@ -960,7 +1014,7 @@ function initMeter(card) {
   }
   meterShownP = p;
   const month = todayISO().slice(0, 7);
-  if (meterFraction(saved, state.settings.saveGoal || 500) >= 1 && !meterPulsed.has(month)) { meterPulsed.add(month); if (!reduce) meter.classList.add('pulse'); }
+  if (meterFraction(saved, state.settings.saveGoal || 500) >= 1 && !meterPulsed.has(month)) { meterPulsed.add(month); if (!reduce && !calmOn()) { meter.classList.add('pulse'); card.classList.add('goal-hit'); haptic([12, 60, 18]); } }
 
   const setGoal = (g, persist, rescale = persist) => {
     state.settings.saveGoal = g;
@@ -1001,7 +1055,7 @@ function initMeter(card) {
   let drag = null;
   const goalFromX = (x) => { const r = row.getBoundingClientRect(); return goalAt((x - r.left) / r.width, scale); };
   const endDrag = () => {
-    if (drag && drag.on) { row.classList.remove('dragging'); meter.classList.remove('dragging'); setGoal(state.settings.saveGoal, true); }
+    if (drag && drag.on) { row.classList.remove('dragging'); meter.classList.remove('dragging'); setGoal(state.settings.saveGoal, true); haptic(10); }
     drag = null;
   };
   row.addEventListener('pointerdown', (e) => {
@@ -1123,7 +1177,7 @@ function donutCard(m, rows) {
       </svg>
       <div class="donut-center" aria-hidden="true"><span class="dc-label">Totalt</span><span class="dc-value${kr(m.total).length > 10 ? ' long' : ''}">${kr(m.total)}</span><span class="dc-sub">${count(m.count, 'kvittering', 'kvitteringer')}</span></div>
     </div>
-    <p class="donut-hint">Trykk på en farge, eller midt i ringen for å bla gjennom kategoriene</p>
+    <p class="donut-hint">Trykk på en farge, dra fingeren rundt ringen, eller trykk midt i ringen for å bla gjennom kategoriene</p>
     <div class="donut-actions" hidden><button type="button" class="btn small" data-donut-receipts>Se kvitteringer</button></div>
     <ul class="legend">${legend}</ul></div>`;
 }
@@ -1212,15 +1266,16 @@ function initDonut(svg, m) {
   let drag = null;
   svg.addEventListener('pointerdown', (e) => {
     const r = svg.getBoundingClientRect(); // cached for the whole drag
-    drag = { x0: e.clientX, y0: e.clientY, r, id: e.pointerId, on: false };
+    // a finger that starts on the ring itself drags round it (touch-action: none there); elsewhere up/down scrolls (Jonas r2)
+    drag = { x0: e.clientX, y0: e.clientY, r, id: e.pointerId, on: false, ring: !!e.target.closest('.arc') };
   });
   svg.addEventListener('pointermove', (e) => {
     if (!drag || e.pointerId !== drag.id) return;
     const dx = e.clientX - drag.x0;
     const dy = e.clientY - drag.y0;
     if (!drag.on) {
-      if (Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx)) { drag = null; return; }
-      if (Math.abs(dx) < 6) return;
+      if (!drag.ring && Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx)) { drag = null; return; }
+      if (Math.max(Math.abs(dx), drag.ring ? Math.abs(dy) : 0) < 6) return;
       drag.on = true;
       try { svg.setPointerCapture(e.pointerId); } catch { /* synthetic events */ }
     }
@@ -1229,7 +1284,7 @@ function initDonut(svg, m) {
     const i = arcAt(lay, x, y);
     if (i >= 0) requestAnimationFrame(() => select(i, { buzz: true }));
   });
-  const stop = (e) => { if (drag && drag.on) { drag.dragged = true; svg._justDragged = true; setTimeout(() => { svg._justDragged = false; }, 0); } drag = null; };
+  const stop = (e) => { if (drag && drag.on) { haptic(10); drag.dragged = true; svg._justDragged = true; setTimeout(() => { svg._justDragged = false; }, 0); } drag = null; };
   svg.addEventListener('pointerup', stop);
   svg.addEventListener('pointercancel', () => { drag = null; });
   svg.addEventListener('click', (e) => {
@@ -2140,6 +2195,10 @@ function bind() {
   $('#offer-more').addEventListener('click', () => { state.shown += PAGE; renderOffers(); });
 
   $('#view-tilbud').addEventListener('click', (e) => {
+    const wb = e.target.closest('[data-where]');
+    if (wb) { wb.setAttribute('aria-pressed', String(wb.getAttribute('aria-pressed') !== 'true')); return; }
+    if (e.target.closest('[data-action="where-done"]')) { finishWhere(false); return; }
+    if (e.target.closest('[data-action="where-all"]')) { finishWhere(true); return; }
     const chain = e.target.closest('[data-chain]');
     if (chain) {
       const id = chain.dataset.chain;
@@ -2376,7 +2435,7 @@ function bind() {
     if (t.matches('[data-textsize-select]')) {
       state.settings.textSize = t.value;
       state.settings.bigText = t.value !== 'normal';
-      if (t.value === 'xstor' && !state.settings.calm) { state.settings.calm = true; toast('Rolig visning er slått på. Du kan slå den av under.'); }
+      if (t.value === 'xstor' && !state.settings.calm) { state.settings.calm = true; toast('Rolig visning er slått på.'); }
       save.settings();
       applyTextSize();
       renderMore();
