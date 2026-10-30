@@ -1316,7 +1316,7 @@ try {
   await click('[data-action="week-basics"]');
   await sleep(300);
   const wb = await listTexts();
-  check(['Yoghurt', 'Smør', 'Ost', 'Bananer'].every((t) => wb.includes(t)) && wb.filter((t) => /^egg$/i.test(t)).length === 1, 'kunde 6: «Legg inn ukas basis» adds the fixed weekly items with one tap', wb.slice(0, 12).join(', '));
+  check(['Yoghurt', 'Smør', 'Ost'].every((t) => wb.includes(t)) && wb.filter((t) => /^egg$/i.test(t)).length === 1 && !wb.includes('Melk') && !wb.includes('Bananer'), 'kunde 6 + Maria L7: «Legg inn ukas basis» adds what is missing (helmelk covers Melk, bananer covers Bananer)', wb.slice(0, 12).join(', '));
   const before2 = wb.length;
   await click('[data-action="week-basics"]');
   await sleep(300);

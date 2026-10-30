@@ -127,9 +127,9 @@ const appSrcP = fs.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8'
   // (B6: theme before first paint), under a key the original never uses.
   const ls = [...appSrcP.matchAll(/(localStorage|sessionStorage)\.\w+\(([^,)]+)/g)].map((m) => m[2].trim());
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  ok(!/sessionStorage/.test(appSrcP) && ls.length > 0 && ls.every((k) => k === 'THEME_KEY') && /const THEME_KEY = 'matkassa-premium-theme'/.test(appSrcP)
+  ok(!/sessionStorage/.test(appSrcP) && ls.length > 0 && ls.every((k) => k === 'THEME_KEY' || k === 'LOOK_KEY') && /const LOOK_KEY = 'matkassa-premium-look'/.test(appSrcP) && /const THEME_KEY = 'matkassa-premium-theme'/.test(appSrcP)
     && /localStorage\.getItem\('matkassa-premium-theme'\)/.test(html) && (!fs.existsSync(new URL('../../mattilbud-app/js/app.js', import.meta.url)) || !/matkassa-premium-theme/.test(fs.readFileSync(new URL('../../mattilbud-app/js/app.js', import.meta.url), 'utf8'))),
-  'app: no shared localStorage keys (only the Premium-only theme mirror; everything else in its own IndexedDB)', ls.join(','));
+  'app: no shared localStorage keys (only the Premium-only theme and look mirrors; everything else in its own IndexedDB)', ls.join(','));
 }
 ok(/matkassa-premium-backup-/.test(appSrcP), 'app: own backup file name (same, compatible backup format)');
 
@@ -477,6 +477,13 @@ function R2(date, name) { return { id: date + name, date, total: 50, store: 'FAK
   ok(isMobileDevice({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)' }), 'chains: an iPhone is a phone');
   ok(isMobileDevice({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit', maxTouchPoints: 5 }), 'chains: an iPad (Mac UA + touch) counts as mobile');
   ok(!isMobileDevice({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit', maxTouchPoints: 0 }), 'chains: a Mac is not a phone');
+  {
+    const P = (ua, tp = 0, coarse = false) => pickProvider({ nav: { userAgent: ua, maxTouchPoints: tp }, storage: mem(), win: { matchMedia: (q) => ({ matches: q.includes('coarse') ? coarse : !coarse }) } }).id;
+    const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+    const MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
+    ok(P(IPHONE, 5, true) === 'unsupported' && P(MAC, 5) === 'unsupported' && P(MAC, 0, true) === 'unsupported' && P('Mozilla/5.0 (Windows NT 10.0; Win64; x64)') === 'unsupported' && P('Mozilla/5.0 (Linux; Android 14; Pixel 8)', 5, true) === 'unsupported' && P(MAC) === 'mac-helper',
+      'Linn r2: only a Mac desktop gets the helper; iPhone, iPad (desktop UA, touch), touch screens, Windows and Android get «Send lenke til Mac-en»');
+  }
   ok(pickProvider({ nav: { userAgent: 'iPhone' } }).id === 'unsupported' && pickProvider({ nav: { userAgent: 'Macintosh' }, storage: mem() }).id === 'mac-helper', 'chains: phone → "Gjøres fra Mac-en", Mac → helper');
   ok(REMA.id === 'rema' && /^#[0-9a-f]{6}$/i.test(REMA.badge.bg) && !/logo|\.png|\.svg|http/i.test(JSON.stringify(REMA)), 'chains: REMA is a text badge (name + colours), no logo file or URL');
 
@@ -665,4 +672,33 @@ function R2(date, name) { return { id: date + name, date, total: 50, store: 'FAK
   ok(/Kundeavisene har ingen tilbud for området akkurat nå/.test(app), 'Maria B12: an empty answer from Tjek is not reported as an error');
 }
 
+/* ---------- Maria rc3 + Hege runde 2: enhetspris på ekte formater (tekstene er kopiert fra Tjek, tilbudene er FAKE) ---------- */
+{
+  const T = await import('../js/tjek.js');
+  const g = (a) => ({ unit: { symbol: 'g', si: { symbol: 'kg', factor: 0.001 } }, size: { from: a, to: a }, pieces: { from: 1, to: 1 } });
+  const pcs = (n) => ({ unit: { symbol: 'pcs', si: { symbol: 'pcs', factor: 1 } }, size: { from: n, to: n }, pieces: { from: 1, to: 1 } });
+  const N = (heading, description, price, quantity = null, pre = null) => T.normalizeOffer({ id: 'FAKE-' + heading, heading, description, pricing: { price, pre_price: pre }, quantity, dealer_id: 'FAKE' });
+  const u = (o) => `${o.unitPrice} ${o.unit}`;
+  ok(u(N('POTET SMÅ GULE', '900 g Gartner pr. pk\n33,33/KG', 30, g(900))) === '33.33 kg', 'Hege r2: «Potet små gule 900 g … pr. pk 33,33/KG» is 33,33 kr/kg, not kr/stk');
+  ok(u(N('EXTRA SWEETMINT', '70 g 5 pk pr. pk\n557,14/KG', 39, g(70))) === '557.14 kg', 'Hege r2: «Extra sweetmint» is 557,14 kr/kg, not kr/stk');
+  const ris = N('TINE RISLUNSJ/SJOKOMELK/SUNNIVA EPLEJUICE', 'Utvalgte. Fra 150 g. Pr stk. Pr kg/l 40,00\nFørpris fra 11,50 - 19,50', 10, g(150));
+  ok(u(ris) === '40 kg' && ris.unitSrc === 'kjede', 'Hege r2: Coop Prix rislunsj «Pr kg/l 40,00» shows 40,00, not 66,67', u(ris));
+  ok(u(N('MANGO 2 PK', '', 35, pcs(2))) === '17.5 stk' && u(N('Granateple', 'Pr stk', 19.9, pcs(1))) === '19.9 stk' && u(N('Kinakål', '', 19.9, pcs(1))) === '19.9 stk', 'Hege r2: Mango 2 pk, Granateple and Kinakål get kr/stk');
+  ok(u(N('MANGO MODNET', 'BAMA, 24,90 pr. stk', 24.9, pcs(1))) === '24.9 stk' && u(N('TINE RISLUNSJ', '4 varianter. 150 g. Pr pk Pr kg 66,67. Før 13,90', 10, g(150))) === '66.67 kg', 'printed kr/stk and kr/kg still read right');
+  ok(u(N('TINE HELMELK (FAKE)', 'Tine, 1,75 l', 24.9)) === '14.23 l' && N('Makrell', '110-170 g', 15).unitPrice === null, 'Maria L4: a size only in the text («1,75 l») gives kr/l; a range gives none');
+  ok(T.isNonProduct('Kronemarked uke 44') && T.isNonProduct('KRONEMARKED 2026') && !T.isNonProduct('Kronesis'), 'Maria L1: «Kronemarked uke 44» and «KRONEMARKED 2026» are hidden too');
+  const it = (id, unitPrice, price) => ({ o: { id, unitPrice, unit: 'kg', price }, cat: 'torr' });
+  const best = T.bestValueIds([it('coop', 9.95, 19.9), it('rema', 9.95, 19.9), it('kiwi', 16, 32), it('meny', 18, 36)]);
+  ok(best.has('coop') && best.has('rema') && best.size === 2, 'Hege r2: hvetemel 9,95 kr/kg in two chains: both get «Beste tilbud»', [...best].join());
+}
+
+{
+  const C = await import('../js/categories.js');
+  const c = C.makeClassifier(C.DEFAULT_CATEGORIES, []);
+  const sc = (q, t) => C.matchOffer(C.tokens(q), c(q), C.tokens(t), c(t), { prefix: true });
+  ok(sc('melk', 'Potetmos med melk') === 0 && sc('melk', 'Tine helmelk') > 0 && sc('melk', 'Q lettmelk') > 0, 'Hege r2: «melk» does not hit «potetmos med melk» (an ingredient), but does hit helmelk and lettmelk');
+  const app = fs.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  ok(/SEARCH_HEADS = \['melk'/.test(app) && /Ingen «\$\{state\.q\}» på tilbud nå/.test(app), 'Hege r2: «helmelk» with no helmelk on offer falls back to the melk group, and says so');
+  ok(/const dealPrice = \(o\) => \(o\.multi && o\.perPiece/.test(app) && /\$\{o\.multi\.payFor\} · \$\{kr\(o\.price\)\}\/stk/.test(app), 'Maria M1: «3 for 2 · 59,90 kr/stk», and the % is the real deal');
+}
 console.log(failed ? `\n${failed} FAILED` : '\nAll unit tests passed');

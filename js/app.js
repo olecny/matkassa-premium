@@ -11,7 +11,7 @@ import { REMA } from './chains/rema.js';
 import { DONUT, arcLayout, dash, arcAt, meterFraction, meterScale, goalAt, enableTilt, shineBestOffers, reducedMotion } from './figures.js';
 import { enableSheetDrag, watchLargeTitle, moveTabIndicator, exitRow, flip, enableSwipe, haptic } from './motion.js';
 
-const APP_VERSION = '0.7.0-premium.rc3';
+const APP_VERSION = '0.7.1-premium.rc1';
 const STALE_MS = 6 * 60 * 60 * 1000;
 const PAGE = 60;
 const TABS = ['hjem', 'tilbud', 'liste', 'forbruk', 'mer'];
@@ -71,11 +71,14 @@ function applyTextSize() {
   root.classList.toggle('big-text', size !== 'normal');
   root.classList.toggle('xbig-text', size === 'xstor');
   root.classList.toggle('calm', !!state.settings.calm);
+  // mirrored for the inline script in index.html, like the theme: no flash of normal size or glow on start (Maria L8)
+  try { if (size === 'normal' && !state.settings.calm) localStorage.removeItem(LOOK_KEY); else localStorage.setItem(LOOK_KEY, `${size}|${state.settings.calm ? 1 : 0}`); } catch { /* private mode */ }
   applyTheme();
 }
 /** Mer → Tema: 'auto' follows the phone (prefers-color-scheme), else forced dark/light. Dark is the default. */
 const THEME_COLOR = { dark: '#05070a', light: '#f1f4f7' };
 const THEME_KEY = 'matkassa-premium-theme';
+const LOOK_KEY = 'matkassa-premium-look';
 function applyTheme() {
   const t = state.settings.theme || 'auto';
   const root = document.documentElement;
@@ -331,11 +334,19 @@ function filteredOffers() {
   let list = activeOffers().filter((x) => (!chains.size || chains.has(x.o.chainId)) && (!state.cat || x.cat === state.cat) && (!food || isFood(x)));
   if (qTokens.length) {
     const qCat = classify(state.q);
-    list = list
-      .map((x) => ({ x, s: matchOffer(qTokens, qCat, x.words, x.cat, { prefix: true, desc: x.desc }) }))
+    const run = (q) => list
+      .map((x) => ({ x, s: matchOffer(q, qCat, x.words, x.cat, { prefix: true, desc: x.desc }) }))
       .filter((r) => r.s > 0)
       .sort((a, b) => b.s - a.s)
       .map((r) => r.x);
+    let hits = run(qTokens);
+    // "helmelk" with no helmelk on offer this week: show the product group (melk) instead of nothing (Hege round 2)
+    state.searchWider = null;
+    if (!hits.length) {
+      const wider = qTokens.map((t) => SEARCH_HEADS.find((h) => t.length > h.length && t.endsWith(h)) || t);
+      if (wider.some((w, i) => w !== qTokens[i])) { hits = run(wider); if (hits.length) state.searchWider = wider.join(' '); }
+    }
+    list = hits;
   }
   const by = {
     // "Laveste pris" compares like with like: kr/kg, then kr/l, then kr/stk (a 10 kr chewing gum is not cheap food)
@@ -349,9 +360,12 @@ function filteredOffers() {
   else if (!qTokens.length) list = [...list].sort((a, b) => foodRank(a.cat) - foodRank(b.cat) || a.o.chain.localeCompare(b.o.chain, 'nb'));
   return list;
 }
+const SEARCH_HEADS = ['melk', 'ost', 'brød', 'kaffe', 'yoghurt', 'juice', 'smør', 'egg', 'kylling', 'laks', 'pølser', 'pizza'];
 const FOOD_ORDER = ['frukt', 'meieri', 'kjott', 'fisk', 'brod', 'palegg', 'ferdigmat', 'frossen', 'torr', 'drikke', 'snacks'];
 const foodRank = (cat) => { const i = FOOD_ORDER.indexOf(cat); return i < 0 ? FOOD_ORDER.length : i; };
-const discount = (o) => (o.prePrice && o.prePrice > o.price ? (o.prePrice - o.price) / o.prePrice : 0);
+// For multi-buy the deal is what one item really costs ("3 for 2": 59,90 → 39,93 a piece), not the single price (Maria M1).
+const dealPrice = (o) => (o.multi && o.perPiece ? o.perPiece : o.price);
+const discount = (o) => (o.prePrice && o.prePrice > dealPrice(o) ? (o.prePrice - dealPrice(o)) / o.prePrice : 0);
 
 
 function chainColor(id, fallback) {
@@ -371,10 +385,10 @@ function validText(o) {
 
 function unitText(o) {
   if (!o.unitPrice) return '';
-  return `${o.unitFrom ? 'fra ' : ''}${kr(o.unitPrice)}/${o.unit}`;
+  return `${o.unitFrom ? 'fra ' : ''}${o.multi && o.unit === 'stk' ? 'snitt ' : ''}${kr(o.unitPrice)}/${o.unit}`;
 }
 /** The big price: "4 for 50 kr" for multi-buy, else the price. */
-const priceText = (o) => (o.multi ? (o.multi.payFor ? `${o.multi.n} for ${o.multi.payFor}` : `${o.multi.n} for ${kr(o.multi.total)}`) : kr(o.price));
+const priceText = (o) => (o.multi ? (o.multi.payFor ? `${o.multi.n} for ${o.multi.payFor} · ${kr(o.price)}/stk` : `${o.multi.n} for ${kr(o.multi.total)}`) : kr(o.price));
 
 function inList(offerId) {
   return state.list.some((i) => i.offer && i.offer.id === offerId && !i.done);
@@ -441,7 +455,7 @@ function renderChips() {
   const food = foodOnly();
   $('#cat-chips').innerHTML =
     `<button class="chip food-chip" type="button" data-foodonly aria-pressed="${food}" title="Skjul blomster, klær, dyremat og husholdning">Kun mat</button>` +
-    `<button class="chip" type="button" data-cat="" aria-pressed="${!state.cat}">Alle varer</button>` +
+    `<button class="chip" type="button" data-cat="" aria-pressed="${!state.cat}">Alle kategorier</button>` +
     state.categories
       .filter((c) => counts.get(c.id) && !(food && NON_FOOD.has(c.id) && state.cat !== c.id))
       .map((c) => `<button class="chip" type="button" data-cat="${esc(c.id)}" aria-pressed="${state.cat === c.id}"><span class="dot" style="--c:${esc(catColor(c))}"></span>${esc(c.name)}</button>`)
@@ -471,7 +485,7 @@ function renderOffers() {
   const feat = !state.q && !state.cat ? featuredOffers() : [];
   $('#for-deg').hidden = !feat.length;
   $('#for-deg-list').innerHTML = feat.map(featCard).join('');
-  $('#offer-count').textContent = `${list.length} tilbud${state.q ? ` for «${state.q}»` : ''}`;
+  $('#offer-count').textContent = state.searchWider ? `Ingen «${state.q}» på tilbud nå · ${list.length} tilbud på ${state.searchWider}` : `${list.length} tilbud${state.q ? ` for «${state.q}»` : ''}`;
   const best = bestValueIds(list); // lowest kr/kg or kr/l among ≥ 3 comparable offers, not % off
   listEl.innerHTML = list.slice(0, state.shown).map((x) => offerCard(x, best.has(x.o.id))).join('');
   enableTilt(listEl);
@@ -553,10 +567,21 @@ function closePaste() {
 /** The "Ukas basis" template: everyday things a family buys every week, added with one tap (Linn). Only adds what is missing. */
 const WEEK_BASICS = ['Melk', 'Brød', 'Egg', 'Yoghurt', 'Smør', 'Ost', 'Bananer', 'Epler', 'Kaffe', 'Toalettpapir'];
 function addWeekBasics() {
-  const have = new Set(state.list.filter((i) => !i.done).map((i) => i.text.toLowerCase()));
-  const add = WEEK_BASICS.filter((t) => !have.has(t.toLowerCase()));
+  // "Lettmelk" or "Tine helmelk" on the list already covers "Melk"; a checked-off "Melk" is put back instead (Maria L7)
+  const words = (t) => t.toLowerCase().split(/[^a-zæøå]+/).filter(Boolean);
+  const covers = (i, b) => words(i.text).some((w) => w === b || w.endsWith(b) || w === b + 'er' || w === b + 'r');
+  let n = 0;
+  const add = [];
+  for (const t of WEEK_BASICS) {
+    const b = t.toLowerCase();
+    if (state.list.some((i) => !i.done && covers(i, b))) continue;
+    const done = state.list.find((i) => i.done && covers(i, b));
+    if (done) { done.done = false; n++; continue; }
+    add.push(t);
+  }
   for (const t of [...add].reverse()) addItem(t);
-  return add.length;
+  if (n) save.list();
+  return n + add.length;
 }
 function renderBadge() {
   const open = state.list.filter((i) => !i.done).length;
@@ -1031,7 +1056,11 @@ function renderSpending() {
   }
   const sum = summarize(state.receipts, classify, state.categories);
   const m = sum.months.get(state.month) || { total: 0, count: 0, byCat: new Map() };
-  const rows = [...m.byCat.entries()].filter(([, v]) => Math.abs(v) >= 0.5).sort((a, b) => b[1] - a[1]);
+  // Pant and returns (negative) are never a slice of the donut; shares are of what was spent (Maria B5)
+  const rows = [...m.byCat.entries()].filter(([, v]) => v >= 0.5).sort((a, b) => b[1] - a[1]);
+  const negRows = [...m.byCat.entries()].filter(([, v]) => v <= -0.5);
+  m.posTotal = rows.reduce((a, [, v]) => a + v, 0);
+  m.negRows = negRows;
   const uncatAmount = m.byCat.get(UNCAT) || 0;
   const pctCat = m.total ? Math.round(((m.total - uncatAmount) / m.total) * 100) : 0;
 
@@ -1074,7 +1103,7 @@ function donutCard(m, rows) {
   const monthName = titleCaseFirst(monthFmt.format(monthDate(state.month)).split(' ')[0]);
   const arcs = rows.map(([id, v], i) => {
     const c = catById(id);
-    const pct = m.total ? Math.round((v / m.total) * 100) : 0;
+    const pct = m.posTotal ? Math.round((v / m.posTotal) * 100) : 0;
     const d = dash(lay[i]);
     const circ = (cls) => `<circle class="${cls}" cx="100" cy="100" r="${DONUT.R}" stroke-dasharray="${d.array}" stroke-dashoffset="${d.offset}" transform="rotate(-90 100 100)"/>`;
     return `<g class="arc" role="button" tabindex="0" aria-pressed="false" data-arc="${i}" data-cat="${esc(id)}" data-len="${lay[i].len}" data-start="${lay[i].start}"
@@ -1082,9 +1111,9 @@ function donutCard(m, rows) {
   }).join('');
   const legend = rows.map(([id, v], i) => {
     const c = catById(id);
-    const pct = m.total ? Math.round((v / m.total) * 100) : 0;
+    const pct = m.posTotal ? Math.round((v / m.posTotal) * 100) : 0;
     return `<li><button type="button" class="legend-row" data-arc="${i}" aria-pressed="false"><span class="dot" style="--c:${esc(c ? catColor(c) : 'var(--text-3)')}"></span><span class="ln">${esc(catName(id))}</span><span class="lv">${krShort(v)} · ${pct} %</span></button></li>`;
-  }).join('');
+  }).join('') + (m.negRows || []).map(([id, v]) => `<li class="legend-neg"><span class="dot" aria-hidden="true"></span><span class="ln">${esc(catName(id))} (pant og retur)</span><span class="lv">−${krShort(-v)}</span></li>`).join('');
   return `<div class="card donut-card"><h2>Per kategori</h2>
     <div class="donut-wrap">
       <svg class="donut" viewBox="0 0 200 200" role="group" aria-label="Forbruk ${esc(monthName.toLowerCase())}: ${esc(krWords(m.total))} fordelt på ${count(rows.length, 'kategori', 'kategorier')}">
@@ -1099,9 +1128,18 @@ function donutCard(m, rows) {
     <ul class="legend">${legend}</ul></div>`;
 }
 
+let donutMonth = null; // the month the Forbruk view last showed, to announce every change, also to/from an empty month (Maria B9)
 function initDonut(svg, m) {
   const reduce = reducedMotion();
-  if (!svg) { donutPrev = null; return; }
+  const live = $('#sr-live');
+  const changed = donutMonth && donutMonth !== state.month;
+  donutMonth = state.month;
+  if (!svg) {
+    donutPrev = null;
+    if (changed && live) live.textContent = `${titleCaseFirst(monthFmt.format(monthDate(state.month)).split(' ')[0])}: ingen kvitteringer`;
+    return;
+  }
+  if (changed && !donutPrev && live) live.textContent = `${titleCaseFirst(monthFmt.format(monthDate(state.month)).split(' ')[0])}: ${krWords(m.total)}`;
   const arcs = [...svg.querySelectorAll('.arc')];
   const card = svg.closest('.donut-card');
   const center = card.querySelector('.donut-center');
@@ -1148,7 +1186,7 @@ function initDonut(svg, m) {
       label.textContent = catName(arcs[i].dataset.cat);
       value.textContent = kr(v);
       value.classList.toggle('long', kr(v).length > 10);
-      sub.textContent = `${m.total ? Math.round((v / m.total) * 100) : 0} % av måneden`;
+      sub.textContent = `${m.posTotal ? Math.round((v / m.posTotal) * 100) : 0} % av det du kjøpte`;
     } else {
       label.textContent = 'Totalt';
       value.textContent = kr(m.total);
@@ -1838,7 +1876,7 @@ async function sendMacLink() {
   const url = location.origin + location.pathname;
   const text = 'Åpne Matkassa på Mac-en for å koble til REMA (én gang):';
   try { if (navigator.share) { await navigator.share({ title: 'Matkassa – koble til REMA', text, url }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
-  try { await navigator.clipboard.writeText(`${text} ${url}`); toast('Lenken er kopiert. Lim den inn i en melding eller e-post til deg selv.'); } catch { toast(url); }
+  try { await navigator.clipboard.writeText(`${text} ${url}`); toast('Lenken er kopiert. Lim den inn i en melding eller e-post til deg selv.'); } catch { toast(`Åpne denne adressen på Mac-en: ${url}`); } // never a bare URL (Maria L6)
 }
 document.addEventListener('click', (e) => { if (e.target.closest('[data-action="send-mac-link"]')) sendMacLink(); });
 

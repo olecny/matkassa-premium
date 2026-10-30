@@ -345,6 +345,7 @@ export function compatible(a, b) {
  * opts.prefix: when the query has no known category, allow plain prefixes (search-as-you-type: "kyll" → kylling).
  * opts.desc: description tokens, used only for a whole-word hit on an offer of exactly the query's category.
  */
+const INGREDIENT_OF = new Set(['med', 'm', 'og', 'uten', 'u', 'i', 'smak']);
 export function matchOffer(q, qCat, words, cat, opts = {}) {
   if (!q.length) return 0;
   // The search field (opts.prefix) is broad: "melk" also finds sjokomelk and laktosefri melk, ranked after real milk.
@@ -354,7 +355,10 @@ export function matchOffer(q, qCat, words, cat, opts = {}) {
   let score = 0;
   for (const t of q) {
     let best = 0;
-    for (const w of words) {
+    for (let k = 0; k < words.length; k++) {
+      const w = words[k];
+      // "Potetmos med melk": melk is an ingredient here, not the product (Hege round 2)
+      if (k > 0 && INGREDIENT_OF.has(words[k - 1])) continue;
       const m = wordMatch(t, w);
       let v = m === 1 ? ((qCat && cat === qCat) || (!qCat && opts.prefix) ? 1.5 : 0) : m;
       if (!v && opts.prefix && t.length >= 4 && w.endsWith(t)) v = 0.5; // sjokomelk, laktosefri: found, ranked last

@@ -44,8 +44,21 @@ export const unsupportedProvider = () => {
 };
 
 /** The provider for this device. A native shell (window.Capacitor) would return its own provider here. */
-export function pickProvider({ nav = globalThis.navigator, storage, fetchImpl } = {}) {
-  if (isMobileDevice(nav)) return unsupportedProvider();
+/**
+ * Only a Mac desktop can run the helper. Anything else gets the phone state ("Send lenke til Mac-en"): iPhone and
+ * Android (any UA), an iPad with a desktop UA (touch points > 1), a touch-first screen, Windows and Linux (Linn r2).
+ */
+export function isMacDesktop(nav = globalThis.navigator, win = globalThis) {
+  if (!nav) return false;
+  const ua = nav.userAgent || '';
+  if (!/Macintosh|Mac OS X/.test(ua) || isMobileDevice(nav)) return false;
+  if ((nav.maxTouchPoints || 0) > 1) return false;
+  try { if (win && win.matchMedia && win.matchMedia('(pointer: coarse)').matches && !win.matchMedia('(pointer: fine)').matches) return false; } catch { /* old browser */ }
+  return true;
+}
+
+export function pickProvider({ nav = globalThis.navigator, storage, fetchImpl, win = globalThis } = {}) {
+  if (!isMacDesktop(nav, win)) return unsupportedProvider();
   return macHelperProvider({ storage, fetchImpl });
 }
 

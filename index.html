@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://squid-api.tjek.com" crossorigin>
   <link rel="stylesheet" href="styles.css">
   <!-- Mer → Tema before the first paint (settings live in IndexedDB, which loads later): no flash of the wrong theme -->
-  <script>try{var t=localStorage.getItem('matkassa-premium-theme');if(t==='dark'||t==='light'){document.documentElement.dataset.theme=t;for(var m of document.querySelectorAll('meta[name="theme-color"]'))m.content=t==='dark'?'#05070a':'#f1f4f7';}}catch(e){}</script>
+  <script>try{var t=localStorage.getItem('matkassa-premium-theme');if(t==='dark'||t==='light'){document.documentElement.dataset.theme=t;for(var m of document.querySelectorAll('meta[name="theme-color"]'))m.content=t==='dark'?'#05070a':'#f1f4f7';}var l=(localStorage.getItem('matkassa-premium-look')||'').split('|'),c=document.documentElement.classList;if(l[0]==='stor'||l[0]==='xstor')c.add('big-text');if(l[0]==='xstor')c.add('xbig-text');if(l[1]==='1')c.add('calm');}catch(e){}</script>
 </head>
 <body>
   <header class="topbar" id="topbar">

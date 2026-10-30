@@ -70,13 +70,15 @@ const U = 'kg|kilo|liter|l|stk|boks|flaske|pakke|pk';
 /** The unit price the chain printed ("Pr kg 69,39", "72,46/KG", "Kilopris fra 220,59", "9,90 pr boks"). It always wins. */
 export function printedUnitPrice(text) {
   const d = String(text || '').replace(/\n/g, ' ');
-  let m = d.match(new RegExp(`(?:pr\\.?|per)\\s*(${U})\\.?\\s*(?:kr\\.?\\s*)?(fra\\s*)?(?:kr\\.?\\s*)?(\\d+[.,]\\d{1,2})`, 'i'));
-  if (m) return { value: num(m[3]), unit: UNIT[m[1].toLowerCase()], from: !!m[2] };
-  m = d.match(new RegExp(`(fra\\s*)?(?:kr\\.?\\s*)?(\\d+[.,]\\d{2})\\s*(?:kr\\.?\\s*)?(?:pr\\.?\\s*|per\\s*|\\/\\s*)(${U})\\b`, 'i'));
-  if (m) return { value: num(m[2]), unit: UNIT[m[3].toLowerCase()], from: !!m[1] };
-  m = d.match(/(kilo|liter)pris:?\s*(fra\s*)?(?:kr\.?\s*)?(\d+[.,]\d{1,2})/i);
-  if (m) return { value: num(m[3]), unit: m[1].toLowerCase() === 'kilo' ? 'kg' : 'l', from: !!m[2] };
-  return null;
+  // Every printed price in the text; a kr/kg or kr/l one wins over kr/stk. "900 g pr. pk 33,33/KG" is 33,33 kr/kg,
+  // not 33,33 kr/stk (Hege round 2), and "Pr kg/l 40,00" is 40,00 kr/kg.
+  const found = [];
+  const unit = (u) => (/^kg\s*\/\s*l$/i.test(u) ? 'kg' : UNIT[u.toLowerCase()]);
+  const U2 = `kg\\s*\\/\\s*l|${U}`;
+  for (const m of d.matchAll(new RegExp(`(?:pr\\.?|per)\\s*(${U2})\\.?\\s*(?:kr\\.?\\s*)?(fra\\s*)?(?:kr\\.?\\s*)?(\\d+[.,]\\d{1,2})(?!\\s*(?:\\/|pr\\.?\\s|per\\s)\\s*(?:kg|l)\\b)`, 'gi'))) found.push({ value: num(m[3]), unit: unit(m[1]), from: !!m[2] });
+  for (const m of d.matchAll(new RegExp(`(fra\\s*)?(?:kr\\.?\\s*)?(\\d+[.,]\\d{2})\\s*(?:kr\\.?\\s*)?(?:pr\\.?\\s*|per\\s*|\\/\\s*)(${U2})\\b`, 'gi'))) found.push({ value: num(m[2]), unit: unit(m[3]), from: !!m[1] });
+  for (const m of d.matchAll(/(kilo|liter)pris:?\s*(fra\s*)?(?:kr\.?\s*)?(\d+[.,]\d{1,2})/gi)) found.push({ value: num(m[3]), unit: m[1].toLowerCase() === 'kilo' ? 'kg' : 'l', from: !!m[2] });
+  return found.find((f) => f.unit === 'kg' || f.unit === 'l') || found[0] || null;
 }
 
 /** "4 for 50" → {n: 4, total: 50}; "3 for 2" → {n: 3, payFor: 2}. */
@@ -96,6 +98,16 @@ function packText(text) {
   if (!m) return null;
   const f = { ml: 0.001, cl: 0.01, dl: 0.1, l: 1, g: 0.001, kg: 1 }[m[3].toLowerCase()];
   return { pieces: Number(m[1]), size: num(m[2]) * f, unit: /l$/i.test(m[3]) ? 'l' : 'kg' };
+}
+
+/** "1,75 l", "500 g", "ca. 1,2 kg" → {size in kg or l, unit}; null for ranges ("110-170 g") or two different sizes. */
+function sizeText(text) {
+  const all = [...String(text || '').matchAll(/(^|[^\d,.\-–])(\d+(?:[.,]\d+)?)\s*(kg|g|l|dl|cl|ml)\b(?!\s*[-–]\s*\d)/gi)];
+  if (all.length !== 1) return null;
+  const m = all[0];
+  const f = { ml: 0.001, cl: 0.01, dl: 0.1, l: 1, g: 0.001, kg: 1 }[m[3].toLowerCase()];
+  const size = num(m[2]) * f;
+  return size > 0 ? { size, unit: /l$/i.test(m[3]) ? 'l' : 'kg' } : null;
 }
 
 /**
@@ -131,13 +143,21 @@ export function priceFacts(o) {
     if (size > 0) return { ...out, value: price / size, unit: si.symbol, from: !!(q.size.to && q.size.from !== q.size.to), src: 'regnet' };
   }
   if (pack && pack.size > 0) return { ...out, value: price / (pack.size * pack.pieces), unit: pack.unit, from: false, src: 'regnet' };
+  // counted things ("MANGO 2 PK", "Granateple, pr stk"): kr/stk from Tjek's pieces (Hege round 2)
+  if (price && si && si.symbol === 'pcs' && q.size && q.size.from >= 1 && q.size.from === (q.size.to || q.size.from)) {
+    return { ...out, value: price / (q.size.from * tjekPieces), unit: 'stk', from: false, src: 'regnet' };
+  }
+  // the size only in the text ("Tine, 1,75 l", "500 g") when Tjek has no quantity (Maria L4); not for ranges or multi-buy
+  const sz = !mb && price ? sizeText(o.description) : null;
+  if (sz) return { ...out, value: price / sz.size, unit: sz.unit, from: false, src: 'regnet' };
   return { ...out, value: null };
 }
 
 /** A campaign name, not a product ("Kronemarked", "Ukens kupp"): hidden (Hege). */
 export function isNonProduct(title) {
   const t = String(title || '').toLowerCase().replace(/[^a-zæøå0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
-  return /^(kronemarked|kronemarkedet|ukens (kupp|tilbud|varer)|kampanje|superlørdag|superpris|tilbud|tilbudsvarer|hele sortimentet|utvalgte varer|alt (til|for) \d+.*)$/.test(t);
+  // also with a week or year after it: "Kronemarked uke 44", "KRONEMARKED 2026" (Maria L1)
+  return /^(kronemarked|kronemarkedet|ukens (kupp|tilbud|varer)|kampanje|kampanjeuke|superlørdag|superpris|tilbud|tilbudsvarer|hele sortimentet|utvalgte varer|alt (til|for) \d+.*)( (uke|veke|år))?( \d{1,4})*$/.test(t);
 }
 
 /** The same product twice from one chain at one price ("Persimon" and "Persimon/kaki"): keep the fuller name. In place. */
@@ -186,12 +206,13 @@ export function bestValueIds(items, n = 3) {
     if (g.length < 3) continue;
     const ups = g.map((x) => x.o.unitPrice).sort((a, b) => a - b);
     const median = ups[Math.floor(ups.length / 2)];
-    const cand = g.filter((x) => (x.o.multi ? x.o.multi.total : x.o.price) >= 15 && !x.o.unitFrom)
-      .map((x) => ({ x, r: x.o.unitPrice / median })).filter((c) => c.r <= 0.85).sort((a, b) => a.r - b.r)[0];
-    if (cand) picks.push({ id: cand.x.o.id, r: cand.r, cat: k.split('|')[0] });
+    const cands = g.filter((x) => (x.o.multi ? x.o.multi.total : x.o.price) >= 15 && !x.o.unitFrom)
+      .map((x) => ({ x, r: x.o.unitPrice / median })).filter((c) => c.r <= 0.85).sort((a, b) => a.r - b.r);
+    // a tie (same lowest kr/kg in two chains) gives every one of them the badge (Hege round 2)
+    if (cands.length) picks.push({ ids: cands.filter((c) => c.x.o.unitPrice === cands[0].x.o.unitPrice).map((c) => c.x.o.id), r: cands[0].r, cat: k.split('|')[0] });
   }
   const seen = new Set();
-  return new Set(picks.sort((a, b) => a.r - b.r).filter((p) => !seen.has(p.cat) && seen.add(p.cat)).slice(0, n).map((p) => p.id));
+  return new Set(picks.sort((a, b) => a.r - b.r).filter((p) => !seen.has(p.cat) && seen.add(p.cat)).slice(0, n).flatMap((p) => p.ids));
 }
 
 export function normalizeOffer(o) {
@@ -257,7 +278,7 @@ export async function fetchOffers(loc = TRONDHEIM, onProgress = () => {}, signal
   const offers = [];
   for (const raw of lists.flat()) {
     const o = normalizeOffer(raw);
-    if (!o.title || o.price == null || isNonProduct(o.title)) continue;
+    if (!o.title || o.price == null || !(o.price > 0) || isNonProduct(o.title)) continue; // 0 kr is not a real offer (Maria L3)
     if (o.till && o.till < now) continue;
     const key = `${o.chainId}|${o.title.toLowerCase()}|${o.price}`;
     if (seen.has(key)) continue;
