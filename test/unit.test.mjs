@@ -319,6 +319,7 @@ ok(rb(100) < 100 && rb(400) - rb(300) < rb(100) - rb(0), 'sheet: dragging up rub
 
   // quantities
   const pq = (s) => { const r = parseQty(s); return `${r.name}|${r.qty}|${r.unit}`; };
+  ok(pq('bleier str 5') === 'bleier str 5|null|null' && pq('sko størrelse 38') === 'sko størrelse 38|null|null' && pq('bleier nr. 4') === 'bleier nr. 4|null|null' && pq('egg 12') === 'egg|12|stk', 'kunde 6: a number after «str»/«størrelse»/«nr» is part of the name, not how many', [pq('bleier str 5'), pq('bleier nr. 4')].join(' / '));
   ok(pq('2 l melk') === 'melk|2|l' && pq('500 g kjøttdeig') === 'kjøttdeig|500|g' && pq('kjøttdeig 500 g') === 'kjøttdeig|500|g', 'qty: "2 l melk", "500 g kjøttdeig", "kjøttdeig 500 g"');
   ok(pq('3 stk paprika') === 'paprika|3|stk' && pq('epler 1 kg') === 'epler|1|kg' && pq('2x melk') === 'melk|2|stk' && pq('melk x2') === 'melk|2|stk' && pq('2 melk') === 'melk|2|stk' && pq('1,5 kg poteter') === 'poteter|1.5|kg', 'qty: stk, kg, 2x, x2, bare number, decimal comma');
   ok(pq('melk') === 'melk|null|null' && pq('4-korn brød') === '4-korn brød|null|null' && pq('Tine helmelk 3.5%') === 'Tine helmelk 3.5%|null|null' && pq('Pepsi max 1,5') === 'Pepsi max 1,5|null|null', 'qty: names with numbers inside stay whole');
@@ -557,6 +558,22 @@ function R2(date, name) { return { id: date + name, date, total: 50, store: 'FAK
     ok(ring >= 3, `contrast ${name}: donut focus ring and goal marker ≥ 3:1 against the card (WCAG 1.4.11)`, ring.toFixed(2));
   }
   ok(/\.arc:focus-visible \.arc-ring/.test(raw) && /\.arc-ring, \.arc-gap \{[^}]*stroke: var\(--text\)/.test(raw) && !/\.arc:focus-visible \.arc-vis/.test(raw), 'a11y: a focused donut arc gets a --text ring, not just a recolour');
+  // kunde 3: no text under 13 px (all in rem, so it grows with Tekststørrelse); chips ≥ 44 px
+  const small = [...raw.matchAll(/font-size:\s*([\d.]+)(rem|px)/g)].filter((m) => (m[2] === 'rem' ? +m[1] * 16 : +m[1]) < 13).map((m) => m[0]);
+  ok(!small.length, 'kunde 3: no text under 13 px anywhere in styles.css', small.join(', '));
+  ok(/\.chip \{[^}]*min-height: 44px/.test(raw) && /html\.xbig-text \{ font-size: 137\.5%; \}/.test(raw) && /\.chip\[aria-pressed="true"\]::before/.test(raw), 'kunde 3: chips ≥ 44 px with a check mark when chosen; Ekstra stor text exists');
+  ok(/\.toast \{[^}]*background: rgb\(26 33 43/.test(raw), 'kunde 3: toasts are dark in both themes');
+  // kunde 4: Rolig visning's softer blue keeps every contrast
+  {
+    const calmB = block(/html\.calm \{/);
+    const ct = { ...dark, ...tokens(calmB) };
+    const bad = [];
+    for (const b of ['bg', 'surface', 'surface-2', 'sheet']) { const r = ratio(parse(ct.accent), parse(ct[b])); if (r < 4.5) bad.push(`accent on ${b} ${r.toFixed(2)}`); }
+    if (ratio(parse(ct['accent-ink']), parse(ct.accent)) < 4.5) bad.push('accent-ink on accent');
+    const soft = over(parse(ct['accent-soft']), parse(ct.surface));
+    if (ratio(parse(ct.accent), soft) < 4.5 || ratio(parse(ct.text), soft) < 4.5) bad.push('on accent-soft');
+    ok(!bad.length && /--glow: none/.test(calmB), 'kunde 4: Rolig visning has no glow and its softer blue is ≥ 4.5:1', bad.join(' | '));
+  }
   ok(Object.keys(dark).filter((k) => k.startsWith('cat-')).length === 15, 'theme: a --cat-* colour for each of the 15 default categories');
 }
 
@@ -572,10 +589,55 @@ function R2(date, name) { return { id: date + name, date, total: 50, store: 'FAK
   ok(F.dash(lay[1]).offset === (-lay[1].start * F.DONUT.C).toFixed(2), 'donut: the dash offset puts an arc at its start angle');
   ok(F.meterFraction(312, 500) === 0.624 && F.meterFraction(900, 500) === 1 && F.meterFraction(0, 500) === 0 && F.meterFraction(10, 0) === 0, 'meter: fill fraction, capped at the goal');
   ok(F.meterScale(312, 500) === 650 && F.meterScale(900, 500) === 1150 && F.meterScale(0, 50) === 100 && F.goalAt(0.8, 650) === 500 && F.goalAt(1, 650) === 650 && F.goalAt(-1, 650) === 50 && F.goalAt(0.83, 650) === 550 && F.goalAt(1, 1e6) === 20000, 'meter: dragging moves the goal in steps of 50 kr within 50–20 000');
-  const offers = [0.1, 0.5, 0.25, 0.4, 0.35].map((d, i) => ({ o: { id: 'FAKE-' + i, d } }));
-  ok([...F.bestOfferIds(offers, (o) => o.d)].join() === 'FAKE-1,FAKE-3,FAKE-4', 'tilbud: the best three by discount get the glowing edge');
-  ok(F.bestOfferIds(offers, () => 0.1).size === 0, 'tilbud: no glow when nothing is a real deal (< 20 %)');
-  ok(/rotateX\(-5\.00deg\) rotateY\(5\.00deg\)/.test(F.tiltTransform(2, 1)), 'tilbud: tilt is capped at 5°');
+  ok(/rotateX\(-8\.00deg\) rotateY\(8\.00deg\)/.test(F.tiltTransform(2, 1)), 'tilbud: tilt is capped at 8° (visible, Jonas)');
 }
 
+/* ---------- Kundeprøve 30.10 punkt 1: enhetspris – regresjon med Heges eksempler (FAKE-tilbud, ekte prisformater) ---------- */
+{
+  const T = await import('../js/tjek.js');
+  const g = (pieces, a, b) => ({ unit: { symbol: 'g', si: { symbol: 'kg', factor: 0.001 } }, size: { from: a, to: b || a }, pieces: { from: pieces, to: pieces } });
+  const N = (heading, description, price, quantity = null, pre = null) => T.normalizeOffer({ id: 'FAKE-' + heading, heading, description, pricing: { price, pre_price: pre }, quantity, dealer_id: 'FAKE' });
+  const regal = N('Utvalgte melsorter', 'Regal, 1 kg. 4 for 50,-', 50, g(1, 1000));
+  ok(regal.multi && regal.multi.n === 4 && regal.multi.total === 50 && regal.unitPrice === 12.5 && regal.unit === 'stk', 'Hege: Regal «4 for 50» is 4 for 50 kr and 12,50 kr/stk, not 12,50 kr/kg', JSON.stringify(regal.multi) + regal.unit);
+  const regal4 = N('Utvalgte melsorter', 'Regal. 4 for 50', 50, g(4, 1000));
+  ok(regal4.unitPrice === 12.5 && regal4.unit === 'stk', 'Hege: Regal with Tjek pieces = 4 is still 12,50 kr/stk (no double count)');
+  const perPiece = N('Pålegg', '3 stk for 89,70', 29.9, g(1, 100));
+  ok(perPiece.multi.total === 89.7 && perPiece.unitPrice === 29.9, 'multi-buy: a Tjek price that is already per piece is not divided again');
+  const treFor2 = N('Yoghurt', 'Ta 3 betal for 2. 3 for 2', 20, g(1, 500));
+  ok(treFor2.multi.payFor === 2 && Math.abs(treFor2.unitPrice - 13.33) < 0.01, '«3 for 2»: pay for 2, 13,33 kr/stk');
+  const ris = N('Tine rislunsj/sjokomelk/sunniva', 'Tine, 300 g. Pr kg 40,00', 20, g(1, 300));
+  ok(ris.unitPrice === 40 && ris.unit === 'kg' && ris.unitSrc === 'kjede', 'Hege: Rislunsj shows the chain\'s 40,00 kr/kg, not our 66,67', ris.unitPrice);
+  const makrell = N('King Oscar makrell', '68–110 g. Pr kg fra 220,59', 15, g(1, 68, 110));
+  ok(makrell.unitPrice === 220.59 && makrell.unitFrom && makrell.unitSrc === 'kjede', 'Hege: Makrell shows fra 220,59 kr/kg, not fra 136,36', makrell.unitPrice);
+  const pepsi = N('Pepsi Max', '10 x 0,33 l', 99);
+  ok(pepsi.pieces === 10 && pepsi.perPiece === 9.9 && pepsi.unit === 'l' && pepsi.unitPrice === 30, 'Hege: Pepsi 99 kr is 10 stk · 9,90 kr/stk (30 kr/l)', JSON.stringify([pepsi.pieces, pepsi.perPiece, pepsi.unitPrice]));
+  for (const [d, v, u] of [['72,46/KG', 72.46, 'kg'], ['pr. l 9,89', 9.89, 'l'], ['Kilopris fra 99,50', 99.5, 'kg'], ['kr 12,90 pr boks', 12.9, 'stk'], ['Literpris: 21,90', 21.9, 'l']]) {
+    const p = T.printedUnitPrice(d);
+    ok(p && p.value === v && p.unit === u, `printed unit price: «${d}»`, JSON.stringify(p));
+  }
+  ok(N('Hel kylling', 'Prior, ca. 1,2 kg', 79.9, g(1, 1200)).unitSrc === 'regnet', 'no printed price: our own kr/kg from the size');
+  const gum = N('Extra tyggegummi', '16 g', 10, g(1, 16), 25);
+  ok(gum.unitPrice === 625, 'gum: 625 kr/kg (correct, but…)');
+  // «Beste tilbud» = lowest unit price among ≥ 3 comparable, not the biggest %
+  const it = (id, cat, unitPrice, price, unit = 'kg', extra = {}) => ({ o: { id, unitPrice, unit, price, ...extra }, cat });
+  const items = [
+    it('gum', 'snacks', 625, 10), it('gum2', 'snacks', 700, 12), it('gum3', 'snacks', 900, 15), it('donut', 'snacks', 300, 12),
+    it('kj1', 'kjott', 99, 99), it('kj2', 'kjott', 160, 80), it('kj3', 'kjott', 180, 90), it('kj4', 'kjott', 200, 100),
+    it('melk1', 'meieri', 18, 25, 'l'), it('melk2', 'meieri', 19, 27, 'l'), it('melk3', 'meieri', 20, 28, 'l'),
+    it('honning', 'torr', 100, 40, 'kg', { prePrice: 100 }), it('torr2', 'torr', 90, 30), it('torr3', 'torr', 95, 35),
+  ];
+  const best = T.bestValueIds(items);
+  ok(best.has('kj1') && !best.has('gum') && !best.has('donut') && !best.has('honning') && !best.has('melk1'), 'Beste tilbud: lowest kr/kg among ≥ 3 like offers (≥ 15 % under the median); no small things under 15 kr, not just % off', [...best].join());
+  ok(T.bestValueIds([it('a', 'kjott', 50, 50), it('b', 'kjott', 200, 100)]).size === 0, 'Beste tilbud: needs at least 3 comparable offers');
+  const sorted = [{ unitPrice: 30, unit: 'l', price: 99 }, { unitPrice: 625, unit: 'kg', price: 10 }, { unitPrice: 12.5, unit: 'stk', price: 50 }, { unitPrice: null, price: 5 }, { unitPrice: 40, unit: 'kg', price: 20 }].sort(T.byUnitPrice);
+  ok(sorted.map((o) => o.unit || '-').join() === 'kg,kg,l,stk,-' && sorted[0].unitPrice === 40, 'Laveste pris: by unit price within kg, l and stk, each on its own');
+}
+
+{
+  const S = await import('../js/settings.js');
+  const m = (inc, cur) => S.mergeSettings(cur ? S.mergeSettings(null, cur) : null, inc);
+  ok(m({ bigText: true }).textSize === 'stor' && m({ bigText: false }).textSize === 'normal' && m({ textSize: 'xstor' }).textSize === 'xstor' && m({ textSize: 'huge' }).textSize === 'normal' && m({}, { textSize: 'xstor' }).textSize === 'xstor',
+    'kunde 3: Tekststørrelse Normal / Stor / Ekstra stor; an old backup with bigText becomes Stor');
+  ok(m({ calm: true }).calm === true && m({}).calm === false && m({ calm: 'ja' }).calm === false, 'kunde 4: Rolig visning is a saved yes/no');
+}
 console.log(failed ? `\n${failed} FAILED` : '\nAll unit tests passed');

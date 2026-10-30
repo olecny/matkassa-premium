@@ -55,8 +55,7 @@
           <select id="offer-sort">
             <option value="fordeg">For deg</option>
             <option value="relevans">Kjede A–Å</option>
-            <option value="pris">Laveste pris</option>
-            <option value="enhet">Laveste kilo-/literpris</option>
+            <option value="pris">Laveste pris per kg/l/stk</option>
             <option value="rabatt">Størst rabatt</option>
           </select>
         </label>
@@ -94,7 +93,7 @@
         <h2>Handlelisten er tom</h2>
         <p>Skriv inn en vare over, gjerne med mengde («2 l melk»), eller trykk <strong>+</strong> på et tilbud. Varer som er på tilbud denne uken blir merket med kjede og pris.</p>
       </div>
-      <p class="hint list-hint">Sveip mot høyre for å krysse av, mot venstre for å slette. <button class="linkish" type="button" data-action="paste-list">Lim inn en liste</button></p>
+      <p class="hint list-hint">Sveip mot høyre for å krysse av, mot venstre for å slette. <button class="linkish" type="button" data-action="paste-list">Lim inn en liste</button> <button class="linkish" type="button" data-action="week-basics">Legg inn ukas basis</button></p>
     </section>
 
     <!-- Forbruk -->
@@ -127,7 +126,7 @@
     <button type="button" data-tab="liste">
       <svg class="i-line" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/></svg>
       <svg class="i-fill" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="3.5" width="5" height="5" rx="1.4"/><rect x="2.5" y="9.5" width="5" height="5" rx="1.4"/><rect x="2.5" y="15.5" width="5" height="5" rx="1.4"/><rect x="9" y="4.9" width="12" height="2.3" rx="1.15"/><rect x="9" y="10.9" width="12" height="2.3" rx="1.15"/><rect x="9" y="16.9" width="12" height="2.3" rx="1.15"/></svg>
-      <span>Handleliste</span><b class="badge" id="list-badge" hidden></b>
+      <span>Liste</span><b class="badge" id="list-badge" hidden></b>
     </button>
     <button type="button" data-tab="forbruk">
       <svg class="i-line" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>

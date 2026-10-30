@@ -387,6 +387,8 @@ export function parseQty(text) {
   m = s.match(LEAD_X);
   if (m && num(m[1]) > 0) return { name: m[2].trim(), qty: num(m[1]), unit: 'stk' };
   m = s.match(TRAIL);
+  // "bleier str 5", "sko størrelse 38", "bleier nr. 4": the number is part of the name, not how many (Linn)
+  if (m && /\b(str|størrelse|size|nr|nummer|type|uke|år)\.?$/i.test(m[1].trim())) return { name: s, qty: null, unit: null };
   if (m && /[a-zæøå]/i.test(m[1]) && num(m[2]) > 0 && (m[3] || /\sx\s*\d/i.test(s) || /^\d+$/.test(m[2]))) {
     return { name: m[1].trim(), qty: num(m[2]), unit: m[3] ? UNITS[m[3].toLowerCase()] : 'stk' };
   }

@@ -5,6 +5,8 @@
 
 export const DONUT = Object.freeze({ CX: 100, CY: 100, R: 73, W: 22, GAP: 2, C: 2 * Math.PI * 73 });
 export const reducedMotion = () => !!(globalThis.matchMedia && globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches);
+/** Mer → Rolig visning: no tilt or shine either (but the app's other motion stays). */
+const calm = () => !!(globalThis.document && document.documentElement.classList.contains('calm'));
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 /** Arcs for the values, clockwise from 12 o'clock: {frac, start, len} with a 2 px gap between arcs. */
@@ -35,14 +37,9 @@ export const meterScale = (saved, goal) => Math.ceil((Math.max(goal, saved, 50) 
 /** The goal under a finger at fraction f (0–1) of a meter with that scale: 50 kr steps, within 50–20 000. */
 export const goalAt = (f, scale) => clamp(Math.round((clamp(f, 0, 1) * scale) / 50) * 50, 50, 20000);
 
-/** Ids of the best offers (highest discount, at least minDiscount), at most n. */
-export function bestOfferIds(items, discountOf, n = 3, minDiscount = 0.2) {
-  return new Set(items.map((x) => ({ id: x.o.id, d: discountOf(x.o) })).filter((x) => x.d >= minDiscount)
-    .sort((a, b) => b.d - a.d).slice(0, n).map((x) => x.id));
-}
 
 /** The tilt transform for a finger at (nx, ny) ∈ [-1, 1]² from the card's centre: max 5°, pressed in a little. */
-export const tiltTransform = (nx, ny) => `perspective(700px) rotateX(${(clamp(ny, -1, 1) * -5).toFixed(2)}deg) rotateY(${(clamp(nx, -1, 1) * 5).toFixed(2)}deg) scale(0.985)`;
+export const tiltTransform = (nx, ny) => `perspective(700px) rotateX(${(clamp(ny, -1, 1) * -8).toFixed(2)}deg) rotateY(${(clamp(nx, -1, 1) * 8).toFixed(2)}deg) scale(0.97)`;
 
 /**
  * Tilt + parallax on the offer cards. One delegated listener set on the list; only the active card moves.
@@ -57,7 +54,7 @@ export function enableTilt(list) {
     raf = 0;
     if (!st || !st.on) return;
     st.card.style.transform = tiltTransform(st.nx, st.ny);
-    if (st.thumb) st.thumb.style.transform = `translate3d(${(st.nx * 6).toFixed(1)}px, ${(st.ny * 6).toFixed(1)}px, 0)`;
+    if (st.thumb) st.thumb.style.transform = `translate3d(${(st.nx * 10).toFixed(1)}px, ${(st.ny * 10).toFixed(1)}px, 0)`;
     st.card.style.setProperty('--lx', `${((st.nx + 1) * 50).toFixed(1)}%`);
     st.card.style.setProperty('--ly', `${((st.ny + 1) * 50).toFixed(1)}%`);
   };
@@ -89,7 +86,7 @@ export function enableTilt(list) {
     st = null;
   };
   list.addEventListener('pointerdown', (e) => {
-    if (reducedMotion() || e.button > 0) return;
+    if (reducedMotion() || calm() || e.button > 0) return;
     const card = e.target.closest('.offer');
     if (!card || e.target.closest('button, a, input, summary')) return;
     end();
@@ -116,7 +113,7 @@ export function enableTilt(list) {
 const shone = new Set();
 let shineObs = null;
 export function shineBestOffers(list) {
-  if (!list || reducedMotion() || typeof IntersectionObserver === 'undefined') return;
+  if (!list || reducedMotion() || calm() || typeof IntersectionObserver === 'undefined') return;
   shineObs = shineObs || new IntersectionObserver((entries) => {
     for (const en of entries) {
       if (!en.isIntersecting) continue;

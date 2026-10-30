@@ -545,6 +545,8 @@ async function neonTests() {
     await media('dark');
     await navigate(BASE + 'index.html#hjem');
     await waitFor(`document.querySelector('#home-body') && document.querySelector('#home-body').children.length`);
+    const zero = await evaluate(`return { note: document.querySelector('#home-save .save-note').textContent, hint: document.querySelector('#home-save .save-hint').textContent };`);
+    check(/0 kr betyr bare at ingen tilbud er krysset av/.test(zero.note) && /Dra langs staven/.test(zero.hint), 'kunde 2: «0 kr spart» is explained in plain words, and the drag hint is visible', JSON.stringify(zero));
     await evaluate(`const db = await new Promise((r) => { const q = indexedDB.open('${APP_DB}'); q.onsuccess = () => r(q.result); });
       await new Promise((r) => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put([{ id: 'save-FAKE-1', at: Date.now(), kr: 212, text: 'TINE HELMELK (FAKE)' }, { id: 'save-FAKE-2', at: Date.now(), kr: 100, text: 'KYLLINGFILET (FAKE)' }], 'savings'); t.oncomplete = r; });
       return true;`);
@@ -584,6 +586,15 @@ async function neonTests() {
     await key('PageUp');
     for (let i = 0; i < 1; i++) await key('ArrowLeft');
     check(await evaluate(`return document.querySelector('.save-handle').getAttribute('aria-valuenow') === '500' && document.querySelector('.goal-label').textContent.trim() === 'Mål 500 kr';`), 'neon meter: the goal slider works with arrow keys and Page Up/Down');
+    // kunde 2: the whole bar can be dragged, not just the marker
+    await ptr('#home-save .meter', 'pointerdown', 20, 7);
+    await ptr('#home-save .meter', 'pointermove', 40, 8);
+    await ptr('#home-save .meter', 'pointermove', 60, 8);
+    await ptr('#home-save .meter', 'pointerup', 60, 8);
+    await sleep(500);
+    const dg = (await readSettings()).saveGoal;
+    check(dg < 500 && dg >= 50 && dg % 50 === 0, 'kunde 2: dragging along the bar itself moves the goal to the finger', dg);
+    for (let i = 0; i < 20 && (await readSettings()).saveGoal < 500; i++) await key('ArrowRight');
     await ptr('#home-save .save-row', 'pointerdown', 20, 22);
     await ptr('#home-save .save-row', 'pointerup', 20, 22);
     check(await evaluate(`return !document.querySelector('#save-list').hidden;`), 'neon meter: a tap on the bar itself still opens the list');
@@ -621,13 +632,20 @@ async function neonTests() {
     check(await evaluate(`return /:/.test(document.querySelector('#sr-live').textContent) && /kroner/.test(document.querySelector('#sr-live').textContent);`), 'neon donut: a month change is announced (aria-live)', await evaluate(`return document.querySelector('#sr-live').textContent;`));
     await click('[data-month="1"]');
     check(await evaluate(`return document.querySelector('.donut').classList.contains('morph');`), 'neon donut: switching month morphs the arcs');
+    await sleep(600);
+    // kunde 4: the figures show that they can be touched, and a tap in the middle of the ring does something
+    check(/Trykk på en farge/.test(await evaluate(`return document.querySelector('.donut-hint').textContent;`)), 'kunde 4: the donut says it can be tapped');
+    const hub = async () => { await evaluate(`const s = document.querySelector('.donut'); const r = s.getBoundingClientRect(); s.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 })); return true;`); return evaluate(`const g = document.querySelector('.donut .arc.sel'); return g ? g.dataset.arc : '-';`); };
+    const h1 = await hub(); const h2 = await hub();
+    check(h1 === '0' && h2 === '1', 'kunde 4: tapping the middle of the donut steps through the categories', h1 + ',' + h2);
+    await evaluate(`const a = document.querySelector('.donut .arc'); a.focus(); a.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); a.blur(); return true;`);
     await sleep(700);
     await v07Shot('neon-dark-forbruk');
 
     await tab('tilbud');
     await waitFor(`document.querySelectorAll('#offer-list .offer').length > 0`);
     const best = await evaluate(`return [...document.querySelectorAll('#offer-list .offer.best')].map((c) => ({ tag: !!c.querySelector('.best-tag'), label: c.getAttribute('aria-label') || '' }));`);
-    fixtureCheck(best.length > 0 && best.length <= 3 && best.every((b) => b.tag && /beste tilbud/.test(b.label)), 'neon tilbud: at most 3 best offers, with a visible "Beste tilbud" and a spoken label', JSON.stringify(best).slice(0, 200));
+    fixtureCheck(best.length > 0 && best.length <= 3 && best.every((b) => b.tag && /beste tilbud: lavest (kilo|liter)pris/.test(b.label)) && best.some((b) => /Svinekotelett/i.test(b.label)) && !best.some((b) => /kaffe|bananer/i.test(b.label)), 'kunde 1: «Beste tilbud» is the lowest kr/kg among like offers (svinekotelett 99 kr/kg), not the biggest % off', JSON.stringify(best).slice(0, 200));
     await ptr('#offer-list .offer .info', 'pointerdown', 40, 20);
     await sleep(160);
     await ptr('#offer-list .offer .info', 'pointermove', 60, 24);
@@ -643,6 +661,13 @@ async function neonTests() {
     await ptr('#offer-list .offer .info', 'pointerup', 41, 60, 1);
     await sleep(1000);
     await v07Shot('neon-dark-tilbud');
+    // kunde 2: an offer on the list counts as "på vei" (striped) on the meter before it is checked off
+    await click('#offer-list [data-add="fake-r2"]');
+    await sleep(300);
+    await tab('hjem');
+    await sleep(300);
+    const pend = await evaluate(`return { note: document.querySelector('#home-save .save-note').textContent, pp: getComputedStyle(document.querySelector('#home-save .meter')).getPropertyValue('--pp') };`);
+    check(/\+ 15 kr på vei/.test(pend.note) && Math.abs(Number(pend.pp) - 327 / 650) < 0.01, 'kunde 2: offers on the list show as savings on the way (+15 kr, striped)', JSON.stringify(pend));
     await tab('liste');
     await v07Shot('neon-dark-liste');
     await tab('mer');
@@ -666,6 +691,38 @@ async function neonTests() {
     await waitFor(`document.querySelector('[data-theme-select]')`);
     await evaluate(`const s = document.querySelector('[data-theme-select]'); s.value = 'auto'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
     check(await evaluate(`return !document.documentElement.dataset.theme;`), 'neon: Tema → Som telefonen follows the phone again');
+    // kunde 3: Ekstra stor tekst at 320 px: the tab names are whole, chips and switch rows ≥ 44 px; it turns on Rolig visning
+    await media('dark');
+    await evaluate(`const s = document.querySelector('[data-textsize-select]'); s.value = 'xstor'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
+    await sleep(200);
+    const xs = await evaluate(`return { x: document.documentElement.classList.contains('xbig-text'), calm: document.documentElement.classList.contains('calm'), sel: document.querySelector('[data-textsize-select]').value };`);
+    check(xs.x && xs.calm && xs.sel === 'xstor' && (await readSettings()).textSize === 'xstor' && (await readSettings()).calm === true, 'kunde 3+4: Tekststørrelse → Ekstra stor is saved and turns on Rolig visning', JSON.stringify(xs));
+    await send('Emulation.setDeviceMetricsOverride', { width: 320, height: 568, deviceScaleFactor: 2, mobile: true }, S);
+    await sleep(300);
+    const tabs = await evaluate(`return [...document.querySelectorAll('.tabbar button > span:not(.badge)')].map((sp) => ({ t: sp.textContent, cut: sp.scrollWidth > sp.parentElement.clientWidth + 1, fs: parseFloat(getComputedStyle(sp).fontSize) }));`);
+    check(tabs.length === 5 && tabs.every((t) => !t.cut && t.fs >= 13) && tabs.some((t) => t.t === 'Liste'), 'kunde 3: at 320 px with Ekstra stor the tab names are never cut (≥ 13 px)', JSON.stringify(tabs));
+    const rows = await evaluate(`return Math.min(...[...document.querySelectorAll('#view-mer .switch-row')].map((r) => r.getBoundingClientRect().height));`);
+    check(rows >= 44, 'kunde 3: switch rows are ≥ 44 px tall (the whole row is the target)', rows);
+    await tab('tilbud');
+    const chips = await evaluate(`return [...document.querySelectorAll('#view-tilbud .chip')].filter((c) => c.offsetParent).map((c) => Math.round(c.getBoundingClientRect().height));`);
+    const pressed = await evaluate(`const c = document.querySelector('#view-tilbud .chip[aria-pressed="true"]'); const u = document.querySelector('#view-tilbud .chip[aria-pressed="false"]'); return { mark: getComputedStyle(c, '::before').content !== 'none', bgOn: getComputedStyle(c).backgroundColor, bgOff: getComputedStyle(u).backgroundColor };`);
+    check(chips.length && Math.min(...chips) >= 44, 'kunde 3: filter chips are ≥ 44 px tall', chips.join());
+    check(pressed.mark && pressed.bgOff === 'rgba(0, 0, 0, 0)' && pressed.bgOn !== pressed.bgOff, 'kunde 3: the chosen filter has a check mark and is filled; the others are only outlined', JSON.stringify(pressed));
+    await ptr('#offer-list .offer .info', 'pointerdown', 40, 20);
+    await sleep(160);
+    await ptr('#offer-list .offer .info', 'pointermove', 60, 24);
+    await sleep(60);
+    check(!(await evaluate(`return document.querySelector('#offer-list .offer').style.transform;`)) && (await evaluate(`return getComputedStyle(document.querySelector('.btn-primary, .chip') || document.body).boxShadow;`)) !== undefined, 'kunde 4: Rolig visning: offer cards do not tilt');
+    await ptr('#offer-list .offer .info', 'pointerup', 60, 24);
+    check(await evaluate(`return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#7cc4ff' && getComputedStyle(document.documentElement).getPropertyValue('--glow').trim() === 'none';`), 'kunde 4: Rolig visning: softer blue, no glow');
+    await v07Shot('rc3-rolig-ekstra-stor-320-tilbud');
+    await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: false }, S);
+    await tab('mer');
+    await evaluate(`const s = document.querySelector('[data-textsize-select]'); s.value = 'normal'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
+    await evaluate(`const c = document.querySelector('[data-setting="calm"]'); if (c.checked) c.click(); return true;`);
+    await sleep(200);
+    check(!(await evaluate(`return document.documentElement.classList.contains('calm') || document.documentElement.classList.contains('big-text');`)), 'kunde 4: Rolig visning can be turned off again, and Normal text is back');
+    await media('light');
     await a11yAudit('neon-mer');
 
     // reduced motion: everything is shown at once, nothing tilts
@@ -1227,6 +1284,34 @@ try {
   await sleep(300);
   const pasted = await listTexts();
   check(['kjøttdeig', 'løk', 'tomater (FAKE)'].every((t) => pasted.includes(t)), 'r4 paste: one item per line, bullets and numbers removed', pasted.slice(0, 6).join(', '));
+  // kunde 6 (Linn): the counter under the title follows, "bleier str 5" keeps its size, Lukk closes, tabs close the sheet, Ukas basis
+  const cnt = () => evaluate(`return { st: document.querySelector('#status').textContent, open: [...document.querySelectorAll('#list-items .item')].filter((li) => !li.classList.contains('done')).length };`);
+  const c1 = await cnt();
+  check(new RegExp(`^${c1.open} varer? igjen`).test(c1.st), 'kunde 6: «N varer igjen» is right right after adding', JSON.stringify(c1));
+  await click('[data-action="paste-list"]');
+  await evaluate(`document.querySelector('#paste-text').value = 'bleier str 5'; document.querySelector('#paste-add').click(); return true;`);
+  await sleep(300);
+  const c2 = await cnt();
+  check(c2.open === c1.open + 1 && new RegExp(`^${c2.open} varer igjen`).test(c2.st) && (await listTexts()).some((t) => /bleier str 5/i.test(t)), 'kunde 6: «bleier str 5» is one item called «bleier str 5», and the counter follows', JSON.stringify(c2));
+  await click('[data-action="paste-list"]');
+  await click('#paste-form button[value="cancel"]');
+  await sleep(450);
+  check(!(await evaluate(`return document.querySelector('#dlg-paste').open;`)), 'kunde 6: «Lukk» closes the paste sheet');
+  await click('[data-action="paste-list"]');
+  await tab('mer');
+  await sleep(200);
+  check(!(await evaluate(`return document.querySelector('#dlg-paste').open;`)), 'kunde 6: switching tab closes the paste sheet');
+  await tab('liste');
+  await click('[data-action="week-basics"]');
+  await sleep(300);
+  const wb = await listTexts();
+  check(['Yoghurt', 'Smør', 'Ost', 'Bananer'].every((t) => wb.includes(t)) && wb.filter((t) => /^egg$/i.test(t)).length === 1, 'kunde 6: «Legg inn ukas basis» adds the fixed weekly items with one tap', wb.slice(0, 12).join(', '));
+  const before2 = wb.length;
+  await click('[data-action="week-basics"]');
+  await sleep(300);
+  check((await listTexts()).length === before2, 'kunde 6: Ukas basis twice does not add duplicates');
+  const plus = await evaluate(`return [...document.querySelectorAll('#list-items .deal summary u')].map((u) => u.textContent);`);
+  fixtureCheck(plus.length > 0 && plus.every((t) => /^\+ \d+ tilbud til$/.test(t)), 'kunde 6: «+2» on an item now says «+ 2 tilbud til»', plus.join(' | '));
 
   // Hjem: budget and "Kom i gang"
   await merPage('budsjett');
@@ -1244,13 +1329,13 @@ try {
   const root = await evaluate(`return document.querySelector('#more-body').textContent;`);
   check(/Dine opplysninger/.test(root) && !/backup|synk|\bEAN\b|JSON|GitHub/i.test(root), 'r4 mer: plain Norwegian on the main list (no backup/synk/EAN/JSON/GitHub)', root.match(/backup|synk|\bEAN\b|JSON|GitHub/i)?.[0] || '');
   check(await evaluate(`return document.querySelectorAll('#more-body .set-row').length >= 8;`), 'r4 mer: grouped rows with subpages');
-  await evaluate(`document.querySelector('[data-setting="bigText"]').click(); return true;`);
+  await evaluate(`const s = document.querySelector('[data-textsize-select]'); s.value = 'stor'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
   const bigText = await evaluate(`return { on: document.documentElement.classList.contains('big-text'), fs: parseFloat(getComputedStyle(document.documentElement).fontSize) };`);
-  check(bigText.on && bigText.fs > 18, 'r4 mer: "Større tekst" makes all text bigger', JSON.stringify(bigText));
+  check(bigText.on && bigText.fs > 18, 'r4 mer: Tekststørrelse → Stor makes all text bigger', JSON.stringify(bigText));
   check(await noHScroll(), 'r4 mer: no horizontal scroll with bigger text');
   const tabClip = () => evaluate(`return [...document.querySelectorAll('.tabbar button > span')].filter((sp) => sp.scrollWidth > sp.clientWidth + 1).map((sp) => sp.textContent).join(', ');`);
   check(!(await tabClip()), 'r4 tabs: no tab label cut off with Større tekst and a badge', await tabClip());
-  await evaluate(`document.querySelector('[data-setting="bigText"]').click(); return true;`);
+  await evaluate(`const s = document.querySelector('[data-textsize-select]'); s.value = 'normal'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
   await merPage('personvern');
   const kvOff = await evaluate(`return [...document.querySelectorAll('#more-body dl.kv dt')].map((dt) => Math.abs(dt.getBoundingClientRect().top - dt.nextElementSibling.getBoundingClientRect().top)).filter((d) => d > 3).length;`);
   check(kvOff === 0, 'r4 personvern: the facts list lines up (term next to value)', `${kvOff} rows out of line`);

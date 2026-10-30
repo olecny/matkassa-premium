@@ -8,8 +8,9 @@ export const DEFAULT_SYNC = { repo: '', path: 'spending.json', token: '', lastSy
 // theme: 'auto' (follow the phone), 'dark' or 'light'. saveGoal: the savings goal on Hjem in kr (steps of 50).
 export const defaultSettings = () => ({
   chains: [], hiddenChains: [], area: null, geo: null, sync: { ...DEFAULT_SYNC },
-  foodOnly: true, budget: null, bigText: false, chainsSeen: false, startDone: false, theme: 'auto', saveGoal: 500,
+  foodOnly: true, budget: null, bigText: false, chainsSeen: false, startDone: false, theme: 'auto', saveGoal: 500, textSize: 'normal', calm: false,
 });
+export const TEXT_SIZES = ['normal', 'stor', 'xstor'];
 export const THEMES = ['auto', 'dark', 'light'];
 /** A savings goal in kr: 50–20 000 in steps of 50, else the default 500. */
 export const validSaveGoal = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 50 && v <= 20000 ? Math.round(v / 50) * 50 : 500);
@@ -73,5 +74,8 @@ export function mergeSettings(current, incoming, { fromBackup = false } = {}) {
     startDone: bool('startDone' in inc ? inc.startDone : cur.startDone, false),
     theme: THEMES.includes('theme' in inc ? inc.theme : cur.theme) ? ('theme' in inc ? inc.theme : cur.theme) : 'auto',
     saveGoal: validSaveGoal('saveGoal' in inc ? inc.saveGoal : cur.saveGoal),
+    // Normal / Stor / Ekstra stor. An old backup only has bigText: true → Stor. bigText stays in step for the original.
+    textSize: TEXT_SIZES.includes(inc.textSize) ? inc.textSize : 'bigText' in inc && !('textSize' in inc) ? (inc.bigText === true ? 'stor' : 'normal') : TEXT_SIZES.includes(cur.textSize) ? cur.textSize : (cur.bigText ? 'stor' : 'normal'),
+    calm: bool('calm' in inc ? inc.calm : cur.calm, false),
   };
 }
