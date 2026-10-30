@@ -842,6 +842,9 @@ html.big-text input, html.big-text select, html.big-text textarea { font-size: 1
 .dc-label { font-size: .8125rem; letter-spacing: .04em; color: var(--text-2); max-width: 9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dc-value { font: 600 34px/1.05 var(--font-display); letter-spacing: -0.022em; font-variant-numeric: tabular-nums; color: var(--text); }
 .big-text .dc-value { font-size: 28px; }
+/* the same øre as the card above (Maria B10); long amounts get smaller instead of touching the ring */
+.dc-value { font-size: 28px; white-space: nowrap; }
+.dc-value.long { font-size: 20px; }
 .dc-sub { font-size: .8125rem; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .donut-wrap.fade { animation: fig-fade 150ms ease; }
 @keyframes fig-fade { from { opacity: 0; } }
@@ -964,3 +967,6 @@ html.big-text input, html.big-text select, html.big-text textarea { font-size: 1
   .tabbar button > span:not(.badge) { padding: 0; letter-spacing: -0.01em; }
   html.big-text .tabbar button { font-size: 14px; }
 }
+
+/* a long word or URL in a message (e.g. a sync error) never pushes the page sideways (Maria B7) */
+.hint, .chain-conn-text, .chain-conn-text small, .toast { overflow-wrap: anywhere; }

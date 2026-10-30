@@ -614,6 +614,7 @@ async function neonTests() {
     const a11y = await evaluate(`const s = document.querySelector('.donut'); const a = s.querySelector('.arc'); return { role: s.getAttribute('role'), label: s.getAttribute('aria-label'), arcRole: a.getAttribute('role'), tab: a.getAttribute('tabindex'), arcLabel: a.getAttribute('aria-label') };`);
     check(a11y.role === 'group' && /kroner fordelt på \d+ kategori/.test(a11y.label) && a11y.arcRole === 'button' && a11y.tab === '0' && /kroner, \d+ prosent/.test(a11y.arcLabel), 'neon donut: group + arcs as buttons with spoken amounts', JSON.stringify(a11y));
     await sleep(900);
+    check(await evaluate(`return document.querySelector('.dc-value').textContent === '307,80 kr' && /307,80 kr/.test(document.querySelector('#spend-body').textContent.replace(/\\s/g, ' '));`), 'Maria B10: the donut centre shows the same øre as the card above (307,80 kr)');
     check(await evaluate(`return [...document.querySelectorAll('.donut .arc')].every((g) => { const v = g.querySelector('.arc-vis'); return Math.abs(parseFloat(v.getAttribute('stroke-dasharray')) - Number(g.dataset.len)) < 0.05; });`), 'neon donut: the arcs draw in to their real share');
     await evaluate(`document.querySelectorAll('.donut .arc')[1].dispatchEvent(new MouseEvent('click', { bubbles: true })); return true;`);
     await sleep(400);

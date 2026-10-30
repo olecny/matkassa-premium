@@ -658,4 +658,11 @@ function R2(date, name) { return { id: date + name, date, total: 50, store: 'FAK
   ok(cats.join() === 'frukt,frukt,frukt,frukt,frukt,torr,kjott', 'Hege: persimon, kinakål, surkål → Frukt/grønt; Toro Bali kylling → Tørrvarer, not Kjøtt', cats.join());
 }
 
+{
+  const css = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+  ok(/\.hint, \.chain-conn-text, \.chain-conn-text small, \.toast \{ overflow-wrap: anywhere; \}/.test(css), 'Maria B7: a long word or URL in a hint, the REMA card or a toast wraps instead of scrolling sideways');
+  const app = fs.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  ok(/Kundeavisene har ingen tilbud for området akkurat nå/.test(app), 'Maria B12: an empty answer from Tjek is not reported as an error');
+}
+
 console.log(failed ? `\n${failed} FAILED` : '\nAll unit tests passed');

@@ -464,7 +464,7 @@ function renderOffers() {
     empty.hidden = !!state.loading; // the skeleton shows while loading
     empty.innerHTML = state.loading
       ? ''
-      : `<h2>Ingen tilbud ennå</h2><p>${navigator.onLine ? 'Klarte ikke å hente tilbud fra Tjek.' : 'Du er frakoblet. Tilbud hentes når du er på nett igjen.'}</p><button class="btn btn-primary" type="button" data-action="refresh">Prøv igjen</button>`;
+      : `<h2>Ingen tilbud ennå</h2><p>${!navigator.onLine ? 'Du er frakoblet. Tilbud hentes når du er på nett igjen.' : state.offersData && !state.error ? 'Kundeavisene har ingen tilbud for området akkurat nå. Prøv igjen senere, eller velg et annet område under Mer.' : 'Klarte ikke å hente tilbud fra Tjek.'}</p><button class="btn btn-primary" type="button" data-action="refresh">Prøv igjen</button>`;
     return;
   }
   const list = filteredOffers();
@@ -1092,7 +1092,7 @@ function donutCard(m, rows) {
         <circle class="donut-glow" cx="100" cy="100" r="${DONUT.R}" transform="rotate(-90 100 100)" stroke-dasharray="0 ${DONUT.C}"/>
         ${arcs}
       </svg>
-      <div class="donut-center" aria-hidden="true"><span class="dc-label">Totalt</span><span class="dc-value">${krShort(m.total)}</span><span class="dc-sub">${count(m.count, 'kvittering', 'kvitteringer')}</span></div>
+      <div class="donut-center" aria-hidden="true"><span class="dc-label">Totalt</span><span class="dc-value${kr(m.total).length > 10 ? ' long' : ''}">${kr(m.total)}</span><span class="dc-sub">${count(m.count, 'kvittering', 'kvitteringer')}</span></div>
     </div>
     <p class="donut-hint">Trykk på en farge, eller midt i ringen for å bla gjennom kategoriene</p>
     <div class="donut-actions" hidden><button type="button" class="btn small" data-donut-receipts>Se kvitteringer</button></div>
@@ -1146,11 +1146,13 @@ function initDonut(svg, m) {
     if (i >= 0) {
       const v = m.byCat.get(arcs[i].dataset.cat) || 0;
       label.textContent = catName(arcs[i].dataset.cat);
-      value.textContent = krShort(v);
+      value.textContent = kr(v);
+      value.classList.toggle('long', kr(v).length > 10);
       sub.textContent = `${m.total ? Math.round((v / m.total) * 100) : 0} % av måneden`;
     } else {
       label.textContent = 'Totalt';
-      value.textContent = krShort(m.total);
+      value.textContent = kr(m.total);
+      value.classList.toggle('long', kr(m.total).length > 10);
       sub.textContent = count(m.count, 'kvittering', 'kvitteringer');
     }
     center.classList.remove('swap'); center.getBoundingClientRect(); center.classList.add('swap');
