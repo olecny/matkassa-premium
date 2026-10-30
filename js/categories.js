@@ -157,7 +157,7 @@ const TIERS = [
     fisk: `laks *laks laksefilet torsk torskefilet =sei seifilet hyse hysefilet sildefilet ørretfilet lysingfilet lysing ørret reker =reke *reker scampi kongekrabbe krabbe blåskjell
       skalldyr fiskefilet =fisk fiskeboller fiskepudding sild spekesild klippfisk tørrfisk makrell kveite breiflabb
       steinbit tunfiskbiff =fish`,
-    frukt: `=chili gresskar spisskål avocado =dadler rosiner oliven =bær frukt grønt grønnsaker eple epler banan bananer
+    frukt: `persimon =kaki sharonfrukt granateple kinakål surkål rødkål hvitkål savoykål =chili gresskar spisskål avocado =dadler rosiner oliven =bær frukt grønt grønnsaker eple epler banan bananer
       appelsin appelsiner mandarin mandariner klementin klementiner sitron sitroner =lime druer pære pærer avokado
       mango ananas jordbær bringebær blåbær melon meloner vannmelon tomat tomater cherrytomater piccolotomater agurk
       paprika salat isberg spinat brokkoli blomkål gulrot gulrøtter =løk rødløk hvitløk vårløk potet poteter
@@ -231,9 +231,12 @@ function hitRank(w, kw, mode) {
 }
 
 /** Keyword-map category id for a text, or null. */
+const BRAND_CAT = { toro: 'torr', knorr: 'torr' };
 export function keywordCategory(text) {
   const words = tokens(text);
   if (!words.length) return null;
+  // A brand that only makes one kind of thing wins over the dish word: "Toro Bali kylling" is a dry mix, not meat.
+  for (const w of words) if (BRAND_CAT[w]) return BRAND_CAT[w];
   const joined = ' ' + words.join(' ') + ' ';
   for (const tier of INDEX) {
     let best = null;
@@ -344,13 +347,18 @@ export function compatible(a, b) {
  */
 export function matchOffer(q, qCat, words, cat, opts = {}) {
   if (!q.length) return 0;
-  if (qCat && !compatible(qCat, cat)) return 0;
+  // The search field (opts.prefix) is broad: "melk" also finds sjokomelk and laktosefri melk, ranked after real milk.
+  // List matching stays strict: a different kind of product is never the same item.
+  const other = qCat && !compatible(qCat, cat);
+  if (other && !opts.prefix) return 0;
   let score = 0;
   for (const t of q) {
     let best = 0;
     for (const w of words) {
       const m = wordMatch(t, w);
-      const v = m === 1 ? ((qCat && cat === qCat) || (!qCat && opts.prefix) ? 1.5 : 0) : m;
+      let v = m === 1 ? ((qCat && cat === qCat) || (!qCat && opts.prefix) ? 1.5 : 0) : m;
+      if (!v && opts.prefix && t.length >= 4 && w.endsWith(t)) v = 0.5; // sjokomelk, laktosefri: found, ranked last
+      if (other) v = Math.min(v, 0.5);
       if (v > best) best = v;
       if (best === 3) break;
     }

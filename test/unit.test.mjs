@@ -303,7 +303,12 @@ ok(rb(100) < 100 && rb(400) - rb(300) < rb(100) - rb(0), 'sheet: dragging up rub
     .map((t) => ({ t, words: tokens(t), cat: C(t) || 'annet', desc: tokens(t === 'Hoff potetmos' ? 'med melk og smør' : '') }));
   const hits = (q, o = {}) => { const p = parseQty(q); return offers.filter((x) => matchOffer(tokens(p.name), C(p.name), x.words, x.cat, { ...o, desc: x.desc }) > 0).map((x) => x.t); };
   const melk = hits('melk', { prefix: true });
-  ok(melk.includes('TINE LETTMELK 1,75 L') && melk.includes('Q helmelk') && !melk.some((t) => /sjokomelk|Kokosmelk|potetmos|MELKESJOKOLADE/i.test(t)), 'match: "melk" finds lettmelk/helmelk, not sjokomelk, kokosmelk, potetmos or melkesjokolade', melk.join(' | '));
+  const strict = hits('melk');
+  ok(strict.includes('TINE LETTMELK 1,75 L') && strict.includes('Q helmelk') && !strict.some((t) => /sjokomelk|Kokosmelk|potetmos|MELKESJOKOLADE/i.test(t)), 'match: on the list "melk" is lettmelk/helmelk, not sjokomelk, kokosmelk, potetmos or melkesjokolade', strict.join(' | '));
+  const rank = (q) => { const p = parseQty(q); return offers.map((x) => ({ t: x.t, s: matchOffer(tokens(p.name), C(p.name), x.words, x.cat, { prefix: true, desc: x.desc }) })).filter((r) => r.s > 0).sort((a, b) => b.s - a.s).map((r) => r.t); };
+  const search = rank('melk');
+  ok(search.includes('Tine sjokomelk') && search.indexOf('Tine sjokomelk') > search.indexOf('Q helmelk') && search.indexOf('Tine sjokomelk') > search.indexOf('TINE LETTMELK 1,75 L') && !search.some((t) => /MELKESJOKOLADE/i.test(t)),
+    'kunde 7 (Hege): searching «melk» also finds sjokomelk and other milk drinks, ranked after real milk', search.join(' | '));
   ok(hits('2 l melk').join() === hits('melk').join(), 'match: a quantity does not change what "2 l melk" matches');
   const hv = hits('hvitløk');
   ok(hv.length === 1 && hv[0] === 'Hvitløk 3 stk', 'match: "hvitløk" ≠ Philadelphia hvitløk', hv.join(' | '));
@@ -332,7 +337,7 @@ ok(rb(100) < 100 && rb(400) - rb(300) < rb(100) - rb(0), 'sheet: dragging up rub
   const pr = buildProfile([{ date: '2026-10-20', lines: Array.from({ length: 12 }, () => ({ name: 'TINE HELMELK 1.75L', amount: 30 })).concat([{ name: 'BANANER', amount: 20 }]) }], { classify: C, now: Date.parse('2026-10-24') });
   const sc = (t) => scoreOffer(pr, tokens(t), { cat: C(t) });
   ok(sc('Tine helmelk').score > 0.2 && sc('Q helmelk').score > 0.2, 'for deg: the same product (any brand) matches');
-  ok(sc('Tine lettmelk').score > 0, 'for deg: a close product (other milk) still matches');
+  ok(sc('Tine lettmelk').score === 0 && sc('Tine skummetmelk').score === 0 && sc('Tine helmelk 1 l').score > 0.2, 'kunde 7 (Hege): a helmelk buyer is not offered lettmelk or skummetmelk (fat level counts)');
   ok(sc('TINE YOGHURT').score === 0 && sc('TINE RISLUNSJ').score === 0 && sc('TINE REVET OST').score === 0 && sc('TINE SJOKOMELK').score === 0, 'for deg: a Tine helmelk purchase is no reason for every Tine product');
   ok(sc('FREIA MELKESJOKOLADE').score === 0, 'for deg: "melk" at the front of a word is not milk');
 }
@@ -640,4 +645,17 @@ function R2(date, name) { return { id: date + name, date, total: 50, store: 'FAK
     'kunde 3: Tekststørrelse Normal / Stor / Ekstra stor; an old backup with bigText becomes Stor');
   ok(m({ calm: true }).calm === true && m({}).calm === false && m({ calm: 'ja' }).calm === false, 'kunde 4: Rolig visning is a saved yes/no');
 }
+/* ---------- Kundeprøve 30.10 punkt 7: kategorier, duplikater og kampanjenavn (FAKE) ---------- */
+{
+  const T = await import('../js/tjek.js');
+  const C = await import('../js/categories.js');
+  const offers = [{ id: 'p1', chainId: 'FAKE-B', title: 'Persimon', price: 10 }, { id: 'p2', chainId: 'FAKE-B', title: 'Persimon/kaki', price: 10 },
+    { id: 'p3', chainId: 'FAKE-K', title: 'Persimon', price: 10 }, { id: 'm1', chainId: 'FAKE-B', title: 'Tine helmelk', price: 24.9 }, { id: 'm2', chainId: 'FAKE-B', title: 'Tine lettmelk', price: 24.9 }];
+  T.dedupeOffers(offers);
+  ok(offers.map((o) => o.id).join() === 'p2,p3,m1,m2', 'Hege: «Persimon» and «Persimon/kaki» from one chain at one price are one offer; other chains and other milks stay', offers.map((o) => o.id).join());
+  ok(T.isNonProduct('Kronemarked') && T.isNonProduct('Ukens kupp!') && !T.isNonProduct('Smågodt') && !T.isNonProduct('Kronesis'), 'Hege: campaign names without a product (Kronemarked) are hidden');
+  const cats = ['Persimon', 'Persimon/kaki', 'Kinakål', 'Surkål', 'Rødkål', 'Toro Bali kylling', 'Kyllingfilet'].map((t) => C.keywordCategory(t));
+  ok(cats.join() === 'frukt,frukt,frukt,frukt,frukt,torr,kjott', 'Hege: persimon, kinakål, surkål → Frukt/grønt; Toro Bali kylling → Tørrvarer, not Kjøtt', cats.join());
+}
+
 console.log(failed ? `\n${failed} FAILED` : '\nAll unit tests passed');

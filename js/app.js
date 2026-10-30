@@ -345,9 +345,12 @@ function filteredOffers() {
     fordeg: hasProfile() ? (a, b) => (b.fit || 0) - (a.fit || 0) || discount(b.o) - discount(a.o) : null,
   }[state.sort];
   if (by) list = [...list].sort(by);
-  else if (!qTokens.length) list = [...list].sort((a, b) => a.o.chain.localeCompare(b.o.chain, 'nb'));
+  // nothing to go on (no receipts, no search, no sort): food first, sweets and fizzy drinks last (Linn, Hege)
+  else if (!qTokens.length) list = [...list].sort((a, b) => foodRank(a.cat) - foodRank(b.cat) || a.o.chain.localeCompare(b.o.chain, 'nb'));
   return list;
 }
+const FOOD_ORDER = ['frukt', 'meieri', 'kjott', 'fisk', 'brod', 'palegg', 'ferdigmat', 'frossen', 'torr', 'drikke', 'snacks'];
+const foodRank = (cat) => { const i = FOOD_ORDER.indexOf(cat); return i < 0 ? FOOD_ORDER.length : i; };
 const discount = (o) => (o.prePrice && o.prePrice > o.price ? (o.prePrice - o.price) / o.prePrice : 0);
 
 
@@ -761,7 +764,8 @@ function miniTrend(months, endKey) {
 /** "Kom i gang": three steps for a new user; gone when done or hidden. */
 function startSteps() {
   return [
-    { key: 'omrade', label: 'Velg område', sub: 'Så får du tilbudene der du handler', done: !!state.settings.area },
+    // the area always has a value (Trondheim until you pick one), so the step shows it as done, with the name (Linn)
+    { key: 'omrade', label: 'Område', sub: '', doneSub: `${esc(area().name)} · ferdig, trykk for å endre`, done: true },
     { key: 'kjeder', label: 'Velg kjedene dine', sub: 'Skjul butikkene du ikke bruker', done: !!state.settings.chainsSeen },
     { key: 'kvitteringer', label: 'Legg til kvitteringer', sub: 'Da ser du forbruket og får tilbud for deg', done: state.receipts.length > 0 },
   ];
@@ -775,7 +779,7 @@ function startCard() {
     <div class="start-head"><h2 id="start-h">Kom i gang</h2><span class="start-n">${n} av 3</span></div>
     <ol class="start-steps">${steps.map((x, k) => `<li class="${x.done ? 'done' : ''}"><button type="button" data-morego="${x.key}">
       <span class="num" aria-hidden="true">${x.done ? '<svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>' : k + 1}</span>
-      <span class="txt"><b>${x.label}</b><small>${x.done ? 'Ferdig' : x.sub}</small></span><span class="chev" aria-hidden="true"></span></button></li>`).join('')}</ol>
+      <span class="txt"><b>${x.label}</b><small>${x.done ? (x.doneSub || 'Ferdig') : x.sub}</small></span><span class="chev" aria-hidden="true"></span></button></li>`).join('')}</ol>
     <button type="button" class="linkish" data-action="start-hide">Skjul</button></section>`;
 }
 

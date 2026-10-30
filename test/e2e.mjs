@@ -545,6 +545,13 @@ async function neonTests() {
     await media('dark');
     await navigate(BASE + 'index.html#hjem');
     await waitFor(`document.querySelector('#home-body') && document.querySelector('#home-body').children.length`);
+    const start = await evaluate(`const b = [...document.querySelectorAll('.start-steps [data-step], .start-steps button, .start-steps li')].map((x) => x.textContent.replace(/\\s+/g, ' ').trim()); return b.join(' | ');`);
+    check(/Område/.test(start) && /Trondheim/.test(start) && !/Velg område/.test(start), 'kunde 7 (Linn): Kom i gang shows the area as done, with its name', start.slice(0, 200));
+    await tab('tilbud');
+    await waitFor(`document.querySelectorAll('#offer-list .offer').length > 0`);
+    const first = await evaluate(`return [...document.querySelectorAll('#offer-list .offer .title')].slice(0, 3).map((t) => t.textContent);`);
+    check(first.length && !first.some((t) => /chips|cola|pepsi|sjokolade|brus|smågodt|godteri/i.test(t)), 'kunde 7: without receipts, Tilbud opens with food, not sweets or fizzy drinks', first.join(' | '));
+    await tab('hjem');
     const zero = await evaluate(`return { note: document.querySelector('#home-save .save-note').textContent, hint: document.querySelector('#home-save .save-hint').textContent };`);
     check(/0 kr betyr bare at ingen tilbud er krysset av/.test(zero.note) && /Dra langs staven/.test(zero.hint), 'kunde 2: «0 kr spart» is explained in plain words, and the drag hint is visible', JSON.stringify(zero));
     await evaluate(`const db = await new Promise((r) => { const q = indexedDB.open('${APP_DB}'); q.onsuccess = () => r(q.result); });
@@ -1231,7 +1238,7 @@ try {
   await evaluate(`const i = document.querySelector('#offer-search'); i.value = 'melk'; i.dispatchEvent(new Event('input', { bubbles: true })); return true;`);
   await sleep(300);
   const melkHits = await evaluate(`return [...document.querySelectorAll('#offer-list .offer .title')].map((t) => t.textContent);`);
-  fixtureCheck(melkHits.some((t) => /helmelk/i.test(t)) && !melkHits.some((t) => /sjokomelk/i.test(t)), 'r4 search: "melk" finds helmelk, not sjokomelk', melkHits.join(' | '));
+  fixtureCheck(melkHits.some((t) => /helmelk/i.test(t)) && melkHits.findIndex((t) => /sjokomelk/i.test(t)) > melkHits.findIndex((t) => /helmelk/i.test(t)), 'r4 search + kunde 7: "melk" finds helmelk first, and sjokomelk after it', melkHits.join(' | '));
   await evaluate(`const i = document.querySelector('#offer-search'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); return true;`);
   await sleep(300);
   const food = await evaluate(`return { pressed: document.querySelector('[data-foodonly]')?.getAttribute('aria-pressed'), text: document.querySelector('#offer-list').textContent };`);
@@ -1323,9 +1330,15 @@ try {
   check(/4\s000 kr i måneden/.test(await evaluate(`return document.querySelector('#more-body').textContent;`)), 'r4 budget: saved and shown in Mer');
   await tab('hjem');
   check(await evaluate(`const b = document.querySelector('#home-spend .budget'); return !!b && /av 4\\s000 kr/.test(b.textContent) && /(igjen|over budsjettet)/.test(b.textContent);`), 'r4 budget: progress and kr left on Hjem');
-  check(await evaluate(`return !!document.querySelector('#home-start') && document.querySelectorAll('#home-start .start-steps li').length === 3;`), 'r4 kom i gang: three-step card on Hjem');
-  await click('[data-action="start-hide"]');
-  check(!(await evaluate(`return !!document.querySelector('#home-start');`)), 'r4 kom i gang: "Skjul" removes it');
+  // the area step is always done now (kunde 7), so with receipts and chains seen the card has nothing left and goes away
+  if (await evaluate(`return !!document.querySelector('#home-start');`)) {
+    check(await evaluate(`return document.querySelectorAll('#home-start .start-steps li').length === 3;`), 'r4 kom i gang: three-step card on Hjem');
+    await click('[data-action="start-hide"]');
+    check(!(await evaluate(`return !!document.querySelector('#home-start');`)), 'r4 kom i gang: "Skjul" removes it');
+  } else {
+    const st = await readSettings();
+    check(st.chainsSeen === true, 'r4 kom i gang: the card hides itself once every step is done', JSON.stringify({ chainsSeen: st.chainsSeen }));
+  }
 
   // Mer: grouped list, plain words, your data, bigger text, danger zone with confirmation
   await tab('mer');

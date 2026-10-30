@@ -134,6 +134,31 @@ export function priceFacts(o) {
   return { ...out, value: null };
 }
 
+/** A campaign name, not a product ("Kronemarked", "Ukens kupp"): hidden (Hege). */
+export function isNonProduct(title) {
+  const t = String(title || '').toLowerCase().replace(/[^a-zæøå0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return /^(kronemarked|kronemarkedet|ukens (kupp|tilbud|varer)|kampanje|superlørdag|superpris|tilbud|tilbudsvarer|hele sortimentet|utvalgte varer|alt (til|for) \d+.*)$/.test(t);
+}
+
+/** The same product twice from one chain at one price ("Persimon" and "Persimon/kaki"): keep the fuller name. In place. */
+export function dedupeOffers(offers) {
+  const parts = (t) => String(t).toLowerCase().split(/[\s/,&+-]+/).filter(Boolean);
+  const drop = new Set();
+  for (let i = 0; i < offers.length; i++) {
+    for (let j = i + 1; j < offers.length; j++) {
+      const a = offers[i];
+      const b = offers[j];
+      if (drop.has(a.id) || drop.has(b.id) || a.chainId !== b.chainId || a.price !== b.price) continue;
+      const pa = parts(a.title);
+      const pb = parts(b.title);
+      const [small, big, sw] = pa.length <= pb.length ? [pa, pb, a] : [pb, pa, b];
+      if (small.length && small.every((w) => big.includes(w))) drop.add(sw.id);
+    }
+  }
+  for (let i = offers.length - 1; i >= 0; i--) if (drop.has(offers[i].id)) offers.splice(i, 1);
+  return offers;
+}
+
 const UNIT_RANK = { kg: 0, l: 1, stk: 2 };
 /** "Laveste pris": by unit price within the same unit (kg, then l, then stk), offers without one last by price. */
 export function byUnitPrice(a, b) {
@@ -232,13 +257,14 @@ export async function fetchOffers(loc = TRONDHEIM, onProgress = () => {}, signal
   const offers = [];
   for (const raw of lists.flat()) {
     const o = normalizeOffer(raw);
-    if (!o.title || o.price == null) continue;
+    if (!o.title || o.price == null || isNonProduct(o.title)) continue;
     if (o.till && o.till < now) continue;
     const key = `${o.chainId}|${o.title.toLowerCase()}|${o.price}`;
     if (seen.has(key)) continue;
     seen.add(key);
     offers.push(o);
   }
+  dedupeOffers(offers);
 
   const chainMap = new Map();
   for (const c of wanted) {

@@ -88,8 +88,11 @@ export function buildProfile(receipts, opts = {}) {
 // Tails that say how a product is cut or packed, not what it is: "kyllingfilet" and "torskefilet" are not the same.
 export const GENERIC_TAILS = new Set(['filet', 'fileter', 'filét', 'bryst', 'lår', 'skiver', 'skive', 'biter', 'bit', 'stykker', 'terninger', 'strimler',
   'kjøtt', 'deig', 'mix', 'miks', 'saus', 'pålegg', 'salat', 'suppe', 'pai', 'gryte', 'boller', 'kaker', 'kake', 'stang', 'staver', 'pinner', 'pakke', 'pose', 'boks']);
+// Milk by fat level: someone who buys helmelk does not want lettmelk suggested (Hege).
+const VARIANTS = [new Set(['helmelk', 'lettmelk', 'skummetmelk', 'ekstralett', 'ekstralettmelk', 'mellommelk'])];
 function wordHit(w, t) {
   if (w === t) return 1;
+  if (VARIANTS.some((v) => v.has(w) && v.has(t))) return 0;
   const head = (a, b) => wordMatch(a, b) === 2 && !GENERIC_TAILS.has(a);
   if (head(t, w) || head(w, t)) return 0.6;
   for (let n = Math.min(w.length, t.length) - 1; n >= 4; n--) {
