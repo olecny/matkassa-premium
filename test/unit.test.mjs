@@ -478,13 +478,13 @@ function R2(date, name) { return { id: date + name, date, total: 50, store: 'FAK
   ok(isMobileDevice({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit', maxTouchPoints: 5 }), 'chains: an iPad (Mac UA + touch) counts as mobile');
   ok(!isMobileDevice({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit', maxTouchPoints: 0 }), 'chains: a Mac is not a phone');
   {
-    const P = (ua, tp = 0, coarse = false) => pickProvider({ nav: { userAgent: ua, maxTouchPoints: tp }, storage: mem(), win: { matchMedia: (q) => ({ matches: q.includes('coarse') ? coarse : !coarse }) } }).id;
+    const P = (ua, tp = 0, coarse = false) => pickProvider({ nav: { userAgent: ua, maxTouchPoints: tp, platform: 'MacIntel' }, storage: mem(), win: { matchMedia: (q) => ({ matches: q.includes('coarse') ? coarse : !coarse }) } }).id;
     const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
     const MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
     ok(P(IPHONE, 5, true) === 'unsupported' && P(MAC, 5) === 'unsupported' && P(MAC, 0, true) === 'unsupported' && P('Mozilla/5.0 (Windows NT 10.0; Win64; x64)') === 'unsupported' && P('Mozilla/5.0 (Linux; Android 14; Pixel 8)', 5, true) === 'unsupported' && P(MAC) === 'mac-helper',
       'Linn r2: only a Mac desktop gets the helper; iPhone, iPad (desktop UA, touch), touch screens, Windows and Android get «Send lenke til Mac-en»');
   }
-  ok(pickProvider({ nav: { userAgent: 'iPhone' } }).id === 'unsupported' && pickProvider({ nav: { userAgent: 'Macintosh' }, storage: mem() }).id === 'mac-helper', 'chains: phone → "Gjøres fra Mac-en", Mac → helper');
+  ok(pickProvider({ nav: { userAgent: 'iPhone' } }).id === 'unsupported' && pickProvider({ nav: { userAgent: 'Macintosh', platform: 'MacIntel' }, storage: mem() }).id === 'mac-helper', 'chains: phone → "Gjøres fra Mac-en", Mac → helper');
   ok(REMA.id === 'rema' && /^#[0-9a-f]{6}$/i.test(REMA.badge.bg) && !/logo|\.png|\.svg|http/i.test(JSON.stringify(REMA)), 'chains: REMA is a text badge (name + colours), no logo file or URL');
 
   const phone = createConnection(REMA, pickProvider({ nav: { userAgent: 'iPhone' } }));
@@ -692,6 +692,17 @@ function R2(date, name) { return { id: date + name, date, total: 50, store: 'FAK
   ok(best.has('coop') && best.has('rema') && best.size === 2, 'Hege r2: hvetemel 9,95 kr/kg in two chains: both get «Beste tilbud»', [...best].join());
 }
 
+{ // round 3: UA + platform + touch; only a clear Mac desktop gets the helper
+  const { pickProvider: PP } = await import('../js/chains/index.js');
+  const st = { getItem: () => null, setItem() {}, removeItem() {} };
+  const mac = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36';
+  const P = (nav) => PP({ nav, storage: st, win: {} }).id;
+  ok(P({ userAgent: mac, platform: 'MacIntel', maxTouchPoints: 0 }) === 'mac-helper', 'round 3: a Mac desktop (Mac UA, MacIntel, no touch) gets the helper');
+  ok(P({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)' }) === 'unsupported' && P({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)', platform: 'MacIntel' }) === 'unsupported', 'round 3: an iPhone UA, with or without a platform, gets the phone state');
+  ok(P({ userAgent: mac }) === 'unsupported' && P({ userAgent: mac, platform: 'iPhone' }) === 'unsupported' && P({ userAgent: mac, platform: 'Linux armv8l' }) === 'unsupported', 'round 3: a Mac UA without a Mac platform gets the phone state');
+  ok(P({ userAgent: mac, platform: 'MacIntel', maxTouchPoints: 1 }) === 'unsupported' && P({ userAgent: mac, platform: 'MacIntel', userAgentData: { mobile: true, platform: 'macOS' } }) === 'unsupported', 'round 3: any touch point or a mobile UA hint gets the phone state');
+}
+
 { // Maria 0.7.1-rc1: N2 (flour), N3 (campaign names, «Kjøp 3, betal for 2»), N4 («ca.» weights)
   const T = await import('../js/tjek.js');
   const it = (id, unitPrice, price) => ({ o: { id, unitPrice, unit: 'kg', price }, cat: 'torr' });
@@ -731,6 +742,6 @@ function R2(date, name) { return { id: date + name, date, total: 50, store: 'FAK
   ok(/\.donut \.arc, \.donut \.arc-hit, \.donut \.arc-vis[^{]*\{ touch-action: none; \}/.test(cssR) && /\.donut \{[^}]*touch-action: pan-y/.test(cssR), 'Jonas r2 + Maria N1: touch-action none on the ring arcs and their hit circles only');
   ok(/addEventListener\('touchmove', \(e\) => \{ if \(ringTouch && e\.cancelable\) e\.preventDefault\(\); \}, \{ passive: false \}\)/.test(app), 'Maria N1: a touch that starts on the ring blocks the page scroll (SVG children ignore touch-action)');
   ok(/html\.calm \.feat\.top/.test(cssR) && /prefers-reduced-motion: reduce\) \{ \.feat\.top/.test(cssR) && /Beste match/.test(app), 'Jonas r2: «Beste match» top 3, without glow under reduced motion and Rolig visning');
-  ok(/\.set-select \{ min-height: 44px/.test(cssR) && /\.switch-row input \{ width: 3\.2rem; height: 2rem; \}/.test(cssR), 'Arne r2: Mer selects ≥ 44 px, switches sized in rem (grow with text size)');
+  ok(/\.set-select \{ min-height: 44px/.test(cssR) && /\.switch-row input, \.switch-row input:checked \{ width: 3\.2rem; height: max\(44px, 2rem\)/.test(cssR), 'Arne r2: Mer selects ≥ 44 px, switches sized in rem (grow with text size)');
 }
 console.log(failed ? `\n${failed} FAILED` : '\nAll unit tests passed');

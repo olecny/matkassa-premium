@@ -51,8 +51,12 @@ export const unsupportedProvider = () => {
 export function isMacDesktop(nav = globalThis.navigator, win = globalThis) {
   if (!nav) return false;
   const ua = nav.userAgent || '';
-  if (!/Macintosh|Mac OS X/.test(ua) || isMobileDevice(nav)) return false;
-  if ((nav.maxTouchPoints || 0) > 1) return false;
+  // round 3: UA + platform + touch together; anything that is not clearly a Mac desktop gets the phone state
+  if (!/Macintosh/.test(ua) || isMobileDevice(nav)) return false;
+  if (nav.userAgentData && nav.userAgentData.mobile) return false;
+  const platform = (nav.userAgentData && nav.userAgentData.platform) || nav.platform || '';
+  if (!/^mac/i.test(platform)) return false;
+  if ((nav.maxTouchPoints || 0) > 0) return false;
   try { if (win && win.matchMedia && win.matchMedia('(pointer: coarse)').matches && !win.matchMedia('(pointer: fine)').matches) return false; } catch { /* old browser */ }
   return true;
 }

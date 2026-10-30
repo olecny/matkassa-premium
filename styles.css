@@ -127,7 +127,7 @@ body {
   color: var(--text);
   font: 400 1rem/1.45 var(--font);
   letter-spacing: -0.011em; /* 16–17 px SF text is tracked slightly tight */
-  padding-bottom: calc(var(--tabbar-h) + var(--safe-b) + 20px);
+  padding-bottom: calc(var(--tabbar-h) + var(--safe-b) + 20px + var(--toast-room, 0px));
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   font-optical-sizing: auto;
@@ -981,8 +981,7 @@ html.big-text input, html.big-text select, html.big-text textarea { font-size: 1
 .filters-label { font-weight: 650; color: var(--accent); flex: none; }
 .filters-sum { min-width: 0; color: var(--text-2); font-size: .875rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .filters[open] .filters-sum { white-space: normal; }
-.filters .chips, .where-card .chips { flex-wrap: wrap; overflow: visible; -webkit-mask-image: none; mask-image: none; margin: 0; padding: 10px 0 2px; }
-.where-card h2 { margin-top: 0; }
+.filters .chips { flex-wrap: wrap; overflow: visible; -webkit-mask-image: none; mask-image: none; margin: 0; padding: 10px 0 2px; }
 
 /* Arne r2: the unit price is never read as a second price: its own smaller line */
 .fu, .priceblock .unit { display: block; font-size: .8125rem; font-weight: 500; color: var(--text-2); white-space: nowrap; }
@@ -992,10 +991,12 @@ html.big-text input, html.big-text select, html.big-text textarea { font-size: 1
 #home-body .card, .home-feat { min-width: 0; }
 /* Mer: selects and switches are ≥ 44 px and grow with Tekststørrelse (Arne r2) */
 .set-select { min-height: 44px; font-size: max(16px, 1rem); }
-.switch-row input { width: 3.2rem; height: 2rem; }
-.switch-row input::after { width: calc(2rem - 4px); height: calc(2rem - 4px); }
+/* round 3 (Arne): the switch's own box is ≥ 44 px tall at every text size; the track is drawn inside it */
+.switch-row input, .switch-row input:checked { width: 3.2rem; height: max(44px, 2rem); background: transparent; border-radius: 12px; }
+.switch-row input::before { content: ""; position: absolute; left: 0; right: 0; top: calc(50% - 1rem); height: 2rem; border-radius: 999px; background: var(--fill-strong); transition: background-color var(--dur-ui) ease; }
+.switch-row input:checked::before { background: var(--accent); }
+.switch-row input::after { top: calc(50% - 1rem + 2px); width: calc(2rem - 4px); height: calc(2rem - 4px); }
 .switch-row input:checked::after { transform: translateX(1.2rem); }
-.switch-row input::before { content: ""; position: absolute; inset: max(-6px, calc((2rem - 44px) / 2)) -4px; }
 
 /* Jonas r2: «For deg» top three: a cyan edge glow and a «Beste match» label (no glow with reduced motion or Rolig visning) */
 .feat.top, .home-feat li.top a { box-shadow: 0 0 0 1.5px var(--accent), 0 0 18px color-mix(in srgb, var(--accent) 42%, transparent); }
@@ -1020,3 +1021,24 @@ html.calm .meter.pulse .meter-glow, html.calm .save-card.goal-hit .save-v { anim
 
 /* Jonas r2: a finger that starts on the ring drags round it instead of scrolling the page */
 .donut .arc, .donut .arc-hit, .donut .arc-vis, .donut .arc-ring, .donut .arc-gap { touch-action: none; }
+
+/* Round 3: «Hvor handler du?» is a compact step: one scrolling chip row and a close button; the offers stay in view */
+.where-card { background: var(--surface); border-radius: var(--r-card); padding: 8px 0 10px 14px; margin: 0 0 12px; box-shadow: var(--shadow-card); }
+.where-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-right: 2px; }
+.where-top h2 { margin: 0; font-size: 1rem; font-weight: 650; }
+.where-x { flex: none; min-width: 44px; min-height: 44px; }
+.where-x svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 2.2; fill: none; stroke-linecap: round; }
+.where-chips { flex-wrap: nowrap; overflow-x: auto; margin: 0; padding: 4px 14px 4px 0; scrollbar-width: none; }
+.where-chips::-webkit-scrollbar { display: none; }
+.where-done { margin-top: 6px; }
+#home-body .where-card { margin-bottom: 14px; }
+.toast { cursor: pointer; }
+/* round 3: the «Beste match» top 3 carry the same edge in the main Tilbud list */
+.offer.match { box-shadow: 0 0 0 1.5px var(--accent), 0 0 18px color-mix(in srgb, var(--accent) 42%, transparent); }
+.offer.match.best { box-shadow: 0 0 0 1.5px var(--accent), var(--glow-sale); }
+.offer .match-badge { margin-top: 4px; }
+html.calm .offer.match { box-shadow: 0 0 0 1.5px var(--accent); }
+@media (prefers-reduced-motion: reduce) { .offer.match { box-shadow: 0 0 0 1.5px var(--accent); } }
+/* round 3 (Jonas): offers with a known regular price say that they count in the savings meter */
+.offer .counts { font-size: .8125rem; color: var(--text-2); margin-top: 2px; }
+.offer .counts::before { content: "✓ "; color: var(--accent); }

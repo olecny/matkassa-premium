@@ -11,7 +11,7 @@ import { REMA } from './chains/rema.js';
 import { DONUT, arcLayout, dash, arcAt, meterFraction, meterScale, goalAt, enableTilt, shineBestOffers, reducedMotion } from './figures.js';
 import { enableSheetDrag, watchLargeTitle, moveTabIndicator, exitRow, flip, enableSwipe, haptic } from './motion.js';
 
-const APP_VERSION = '0.7.1-premium';
+const APP_VERSION = '0.7.2-premium';
 const STALE_MS = 6 * 60 * 60 * 1000;
 const PAGE = 60;
 const TABS = ['hjem', 'tilbud', 'liste', 'forbruk', 'mer'];
@@ -220,6 +220,9 @@ function toast(msg, action = null) {
   const bar = document.querySelector('.tabbar');
   if (bar) t.style.bottom = `${Math.round(bar.getBoundingClientRect().height) + 12}px`;
   t.hidden = false;
+  t.title = 'Trykk for å lukke';
+  // the page gets room below, so the toast never sits on top of the last controls (round 3)
+  document.documentElement.style.setProperty('--toast-room', `${Math.round(t.getBoundingClientRect().height) + 16}px`);
   clearTimeout(toastTimer);
   toastTimer = setTimeout(hideToast, toastMs(msg));
 }
@@ -227,7 +230,7 @@ function hideToast() {
   const t = $('#toast');
   if (t.hidden) return;
   t.classList.add('leaving');
-  const done = () => { if (t.classList.contains('leaving')) { t.hidden = true; t.classList.remove('leaving'); } };
+  const done = () => { if (t.classList.contains('leaving')) { t.hidden = true; t.classList.remove('leaving'); document.documentElement.style.setProperty('--toast-room', '0px'); } };
   t.addEventListener('transitionend', done, { once: true });
   setTimeout(done, 450); // reduced motion or no transition: still hide
 }
@@ -360,7 +363,12 @@ function filteredOffers() {
   }[state.sort];
   if (by) list = [...list].sort(by);
   // nothing to go on (no receipts, no search, no sort): food first, sweets and fizzy drinks last (Linn, Hege)
-  else if (!qTokens.length) list = [...list].sort((a, b) => foodRank(a.cat) - foodRank(b.cat) || a.o.chain.localeCompare(b.o.chain, 'nb'));
+  else if (!qTokens.length) {
+    // round 3 (Linn): the chains you chose first, then food first, then the best deal; never «Bunnpris first» by the alphabet
+    const mine = selectedChains();
+    const own = (x) => (mine.size && !mine.has(x.o.chainId) ? 1 : 0);
+    list = [...list].sort((a, b) => own(a) - own(b) || foodRank(a.cat) - foodRank(b.cat) || discount(b.o) - discount(a.o) || a.o.title.localeCompare(b.o.title, 'nb'));
+  }
   return list;
 }
 const SEARCH_HEADS = ['melk', 'ost', 'brød', 'kaffe', 'yoghurt', 'juice', 'smør', 'egg', 'kylling', 'laks', 'pølser', 'pizza'];
@@ -404,13 +412,13 @@ function whyText(because, via) {
     : `Fordi du kjøper ${esc(because.name.toLowerCase())} (${because.n}×)`;
 }
 
-function offerCard({ o, fit, because, via }, best = false) {
+function offerCard({ o, fit, because, via }, best = false, match = false) {
   const added = inList(o.id);
   const d = discount(o);
   const img = o.img
     ? `<img class="thumb" src="${esc(o.img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb none',textContent:'Bilde'}))">`
     : '<div class="thumb none">Bilde</div>';
-  return `<li class="offer${best ? ' best' : ''}" data-offer="${esc(o.id)}"${best ? ` aria-label="${esc(titleCase(o.title))}, ${esc(priceText(o))}, ${esc(unitText(o))}${d >= 0.05 ? `, minus ${Math.round(d * 100)} prosent` : ''}, beste tilbud: lavest ${o.unit === 'l' ? 'literpris' : 'kilopris'} av like varer, ${esc(o.chain)}"` : ''}>
+  return `<li class="offer${best ? ' best' : ''}${match ? ' match' : ''}" data-offer="${esc(o.id)}"${best ? ` aria-label="${esc(titleCase(o.title))}, ${esc(priceText(o))}, ${esc(unitText(o))}${d >= 0.05 ? `, minus ${Math.round(d * 100)} prosent` : ''}, beste tilbud: lavest ${o.unit === 'l' ? 'literpris' : 'kilopris'} av like varer, ${esc(o.chain)}"` : ''}>
     <span class="tilt-light" aria-hidden="true"></span>${best ? '<span class="best-edge" aria-hidden="true"></span>' : ''}
     ${img}
     <div class="info">
@@ -418,6 +426,8 @@ function offerCard({ o, fit, because, via }, best = false) {
       ${o.desc ? `<div class="desc">${esc(o.desc)}</div>` : ''}
       <div class="meta"><span class="chain" style="--c:${esc(chainColor(o.chainId, o.color))}">${esc(o.chain)}</span><span>${validText(o)}</span></div>
       ${fit >= FIT_MIN && because ? `<div class="why">${whyText(because, via)}</div>` : ''}
+      ${match ? MATCH_BADGE : ''}
+      ${o.prePrice && o.prePrice > dealPrice(o) ? '<div class="counts">Teller med i sparemåleren</div>' : ''}
       ${best ? `<span class="best-tag" title="Lavest ${o.unit === 'l' ? 'literpris' : 'kilopris'} blant minst 3 like varer">Beste tilbud · lavest ${o.unit === 'l' ? 'literpris' : 'kilopris'}</span>` : ''}
     </div>
     <div class="priceblock">
@@ -469,23 +479,38 @@ function renderChips() {
 }
 
 /* "Hvor handler du?" the first time (Linn): pick your chains once; only those are shown afterwards. */
+/* «Hvor handler du?»: a compact first-start step on Hjem and Tilbud (round 3: one chip row, ×, the offers stay
+   visible; never again once chains are chosen or it is closed). */
+const wherePicked = new Set();
+const whereOpen = () => !state.settings.chainsSeen && state.offersData && knownChains().length >= 2;
+function whereHTML(id) {
+  const known = knownChains();
+  return `<section class="where-card" id="${id}" aria-labelledby="${id}-h">
+    <div class="where-top"><h2 id="${id}-h">Hvor handler du?</h2><button class="icon-btn where-x" type="button" data-action="where-close" aria-label="Lukk «Hvor handler du?» (alle butikker vises)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <div class="chips where-chips" role="group" aria-label="Butikkene dine">${known.map((c) => `<button class="chip" type="button" data-where="${esc(c.id)}" aria-pressed="${wherePicked.has(c.id)}"><span class="dot" style="--c:${esc(chainColor(c.id, c.color))}"></span>${esc(c.name)}</button>`).join('')}</div>
+    <button class="btn btn-primary small where-done" type="button" data-action="where-done"${wherePicked.size ? '' : ' hidden'}>Bare disse (${wherePicked.size})</button>
+  </section>`;
+}
 function renderWhere() {
   const el = $('#where-card');
-  const known = state.offersData ? knownChains() : [];
-  if (state.settings.chainsSeen || known.length < 2) { el.hidden = true; return; }
+  if (!whereOpen()) { el.hidden = true; el.innerHTML = ''; return; }
+  if (!el.firstElementChild) el.innerHTML = whereHTML('where-t');
   el.hidden = false;
-  if (el.dataset.ready) return;
-  el.dataset.ready = '1';
-  el.innerHTML = `<h2>Hvor handler du?</h2><p class="hint" style="margin-top:0">Velg butikkene dine, så viser vi bare tilbudene der. Du kan endre det senere under Mer → Kjeder.</p>
-    <div class="chips wrap" role="group" aria-label="Butikkene dine">${known.map((c) => `<button class="chip" type="button" data-where="${esc(c.id)}" aria-pressed="false"><span class="dot" style="--c:${esc(chainColor(c.id, c.color))}"></span>${esc(c.name)}</button>`).join('')}</div>
-    <div class="actions"><button class="btn btn-primary" type="button" data-action="where-done">Vis tilbudene</button><button class="btn btn-ghost" type="button" data-action="where-all">Alle butikker</button></div>`;
+}
+function toggleWhere(b) {
+  const id = b.dataset.where;
+  if (wherePicked.has(id)) wherePicked.delete(id); else wherePicked.add(id);
+  document.querySelectorAll(`[data-where="${CSS.escape(id)}"]`).forEach((x) => x.setAttribute('aria-pressed', String(wherePicked.has(id))));
+  document.querySelectorAll('.where-done').forEach((d) => { d.hidden = !wherePicked.size; d.textContent = `Bare disse (${wherePicked.size})`; });
 }
 function finishWhere(all) {
-  const picked = new Set([...document.querySelectorAll('#where-card [data-where][aria-pressed="true"]')].map((b) => b.dataset.where));
-  if (!all && picked.size) state.settings.hiddenChains = knownChains().map((c) => c.id).filter((id) => !picked.has(id));
+  if (!all && wherePicked.size) state.settings.hiddenChains = knownChains().map((c) => c.id).filter((id) => !wherePicked.has(id));
   state.settings.chainsSeen = true;
   save.settings();
   $('#where-card').hidden = true;
+  $('#where-card').innerHTML = '';
+  document.querySelector('#where-h')?.remove();
+  state.shown = PAGE;
   renderOffers();
   render();
 }
@@ -502,6 +527,8 @@ function renderFilterSum() {
 }
 function renderOffers() {
   renderWhere();
+  const sortSel = $('#offer-sort');
+  if (sortSel && sortSel.value !== state.sort) { sortSel.value = state.sort; if (sortSel.selectedIndex < 0) { state.sort = 'pris'; sortSel.value = 'pris'; } }
   renderFilterSum();
   renderChips();
   const empty = $('#offer-empty');
@@ -526,7 +553,9 @@ function renderOffers() {
   $('#for-deg-list').innerHTML = feat.map((f, i) => featCard(f, i)).join('');
   $('#offer-count').textContent = state.searchWider ? `Ingen «${state.q}» på tilbud nå · ${list.length} tilbud på ${state.searchWider}` : `${list.length} tilbud${state.q ? ` for «${state.q}»` : ''}`;
   const best = bestValueIds(list); // lowest kr/kg or kr/l among ≥ 3 comparable offers, not % off
-  listEl.innerHTML = list.slice(0, state.shown).map((x) => offerCard(x, best.has(x.o.id))).join('');
+  // round 3: the «Beste match» top 3 from the carousel are marked in the list too
+  const top = new Set(feat.slice(0, 3).map((f) => f.o.id));
+  listEl.innerHTML = list.slice(0, state.shown).map((x) => offerCard(x, best.has(x.o.id), top.has(x.o.id))).join('');
   enableTilt(listEl);
   shineBestOffers(listEl);
   more.hidden = list.length <= state.shown;
@@ -879,6 +908,7 @@ function budgetHTML(used) {
 function renderHome() {
   const body = $('#home-body');
   const parts = [];
+  if (whereOpen()) parts.push(whereHTML('where-h'));
   const sc = startCard();
   if (sc) parts.push(sc);
   parts.push(saveCard());
@@ -1933,12 +1963,18 @@ const CONNECT_HELP = {
 };
 
 /* "Send lenke til Mac-en" (REMA on a phone): the share sheet, else copy the link. Nothing is sent by us. */
+// round 3: a link straight to Mer → Kjeder; the share sheet where there is one, else «Kopier lenke» and «Send på e-post»
+const macLink = () => `${location.origin}${location.pathname}#mer/kjeder`;
+const MAC_TEXT = 'Åpne Matkassa på Mac-en for å koble til REMA (én gang):';
+const macMail = () => `mailto:?subject=${encodeURIComponent('Matkassa: koble til REMA på Mac-en')}&body=${encodeURIComponent(`${MAC_TEXT}\n${macLink()}`)}`;
 async function sendMacLink() {
-  const url = location.origin + location.pathname;
-  const text = 'Åpne Matkassa på Mac-en for å koble til REMA (én gang):';
-  try { if (navigator.share) { await navigator.share({ title: 'Matkassa – koble til REMA', text, url }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
-  try { await navigator.clipboard.writeText(`${text} ${url}`); toast('Lenken er kopiert. Lim den inn i en melding eller e-post til deg selv.'); } catch { toast(`Åpne denne adressen på Mac-en: ${url}`); } // never a bare URL (Maria L6)
+  try { if (navigator.share) { await navigator.share({ title: 'Matkassa – koble til REMA', text: MAC_TEXT, url: macLink() }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
+  copyMacLink();
 }
+async function copyMacLink() {
+  try { await navigator.clipboard.writeText(`${MAC_TEXT} ${macLink()}`); toast('Lenken er kopiert. Lim den inn i en melding eller e-post til deg selv.'); } catch { toast(`Åpne denne adressen på Mac-en: ${macLink()}`); } // never a bare URL (Maria L6)
+}
+document.addEventListener('click', (e) => { if (e.target.closest('[data-action="copy-mac-link"]')) copyMacLink(); });
 document.addEventListener('click', (e) => { if (e.target.closest('[data-action="send-mac-link"]')) sendMacLink(); });
 
 /* ---------- Koble til REMA (Mer → Kjeder). The login provider (Mac helper today, an iOS app later) is chosen in
@@ -1982,7 +2018,9 @@ function chainCard() {
   if (s.state === STATES.UNSUPPORTED) {
     const c = (cloudState.connections || []).find((x) => x.chain === 'rema');
     body = `<p class="hint">REMA kobles til fra en Mac én gang. Etterpå kommer kvitteringene av seg selv.</p>
-      <div class="actions"><button class="btn small" type="button" data-action="send-mac-link">Send lenke til Mac-en</button></div>
+      <p class="hint">På Mac-en tar det ca. 2 minutter: én installasjon, så logger du inn hos REMA.</p>
+      <div class="actions">${navigator.share ? '<button class="btn small" type="button" data-action="send-mac-link">Send lenke til Mac-en</button>'
+        : `<button class="btn small" type="button" data-action="copy-mac-link">Kopier lenke</button><a class="btn small" href="${esc(macMail())}" data-action="mail-mac-link">Send på e-post</a>`}</div>
       ${c ? `<p class="hint">Koblet via Mac-en${c.last_fetch_at ? ` · hentet ${esc(timeFmt.format(new Date(c.last_fetch_at)))}` : ''}</p>` : ''}`;
   } else if (s.state === STATES.NOT_INSTALLED) {
     body = `<p class="hint">For å koble til REMA trenger Mac-en en liten hjelper som bare denne Mac-en kan nå. Slik installerer du den (én gang):</p>
@@ -2161,7 +2199,8 @@ function bind() {
   for (const d of document.querySelectorAll('dialog.sheet')) enableSheetDrag(d);
   watchLargeTitle($('#large-title'), $('#topbar'));
   $('#toast').addEventListener('click', (e) => {
-    if (!e.target.closest('.toast-act') || !toastAction) return;
+    // round 3: a tap anywhere on the toast closes it
+    if (!e.target.closest('.toast-act') || !toastAction) { clearTimeout(toastTimer); hideToast(); return; }
     const run = toastAction.run;
     toastAction = null;
     hideToast();
@@ -2200,11 +2239,14 @@ function bind() {
   $('#offer-sort').addEventListener('change', (e) => { state.sort = e.target.value; state.shown = PAGE; renderOffers(); });
   $('#offer-more').addEventListener('click', () => { state.shown += PAGE; renderOffers(); });
 
-  $('#view-tilbud').addEventListener('click', (e) => {
+  // «Hvor handler du?» on Hjem and Tilbud
+  document.addEventListener('click', (e) => {
     const wb = e.target.closest('[data-where]');
-    if (wb) { wb.setAttribute('aria-pressed', String(wb.getAttribute('aria-pressed') !== 'true')); return; }
+    if (wb) { toggleWhere(wb); return; }
     if (e.target.closest('[data-action="where-done"]')) { finishWhere(false); return; }
-    if (e.target.closest('[data-action="where-all"]')) { finishWhere(true); return; }
+    if (e.target.closest('[data-action="where-close"]')) finishWhere(true);
+  });
+  $('#view-tilbud').addEventListener('click', (e) => {
     const chain = e.target.closest('[data-chain]');
     if (chain) {
       const id = chain.dataset.chain;

@@ -551,6 +551,39 @@ async function whereTests() {
     const r = await evaluate(`return { hidden: document.querySelector('#where-card').hidden, chains: [...new Set([...document.querySelectorAll('#offer-list .offer .chain')].map((c) => c.textContent))] };`);
     const st = await readSettings();
     check(r.hidden && r.chains.length === 1 && /REMA/.test(r.chains[0]) && st.chainsSeen && !st.hiddenChains.includes(rema) && st.hiddenChains.length >= 1, 'Linn r2: a REMA-only shopper sees only REMA offers (no Bunnpris/KIWI), and is not asked again', JSON.stringify(r));
+    await navigate(BASE + 'index.html#hjem');
+    await waitFor(`document.querySelector('#home-body') && document.querySelector('#home-body').children.length`);
+    await sleep(300);
+    check(await evaluate(`return !document.querySelector('.where-card:not([hidden]) [data-where]');`), 'round 3: once chains are chosen, «Hvor handler du?» never shows again (Hjem or Tilbud)');
+  });
+  // round 3: it shows on Hjem at first start, is compact, has ×, the offers stay visible on Tilbud, and × is for good
+  await inFreshContext('where-3', async () => {
+    await navigate(BASE + 'index.html#hjem');
+    check(await waitFor(`document.querySelectorAll('#home-body .where-card [data-where]').length >= 2`, 10000), 'round 3 (Linn): a fresh profile is asked «Hvor handler du?» on Hjem');
+    await tab('tilbud');
+    await waitFor(`document.querySelectorAll('#offer-list .offer').length > 0`);
+    const w = await evaluate(`const c = document.querySelector('#where-card'); const o = document.querySelector('#offer-list .offer'); const rows = new Set([...c.querySelectorAll('[data-where]')].map((b) => Math.round(b.getBoundingClientRect().top)));
+      return { h: Math.round(c.getBoundingClientRect().height), rows: rows.size, x: !!c.querySelector('[data-action="where-close"]'), offerTop: Math.round(o.getBoundingClientRect().top), vh: innerHeight, sort: document.querySelector('#offer-sort').selectedOptions[0]?.textContent || '' };`);
+    check(w.h <= 170 && w.rows === 1 && w.x && w.offerTop < w.vh && w.sort.length > 0, 'round 3: the step is compact (one chip row, ≤ 170 px, a × button), the first offer is still on screen, and the sort select shows a value', JSON.stringify(w));
+    const firstChains = await evaluate(`return [...document.querySelectorAll('#offer-list .offer .chain')].slice(0, 8).map((c) => c.textContent);`);
+    check(firstChains.length >= 4 && new Set(firstChains).size >= 2, 'round 3 (Linn): without receipts Tilbud does not open with one chain (Bunnpris) by the alphabet', firstChains.join(', '));
+    await click('#where-card [data-action="where-close"]');
+    await sleep(300);
+    const st = await readSettings();
+    check(await evaluate(`return document.querySelector('#where-card').hidden;`) && st.chainsSeen === true && !(st.hiddenChains || []).length, 'round 3: × closes it for good and keeps every chain', JSON.stringify({ seen: st.chainsSeen, hidden: st.hiddenChains }));
+    // toasts close with a tap, and the page makes room for them
+    await evaluate(`document.querySelector('#offer-list .offer [data-add]').click(); return true;`);
+    await sleep(200);
+    await evaluate(`document.querySelector('#offer-list .offer [data-add]').click(); return true;`);
+    await sleep(150);
+    const t1 = await evaluate(`const t = document.querySelector('#toast'); return { shown: !t.hidden, room: getComputedStyle(document.documentElement).getPropertyValue('--toast-room').trim() };`);
+    await evaluate(`document.querySelector('#toast span').click(); return true;`);
+    await sleep(500);
+    check(t1.shown && parseFloat(t1.room) > 16 && (await evaluate(`return document.querySelector('#toast').hidden && getComputedStyle(document.documentElement).getPropertyValue('--toast-room').trim() === '0px';`)), 'round 3: a toast closes with a tap, and while it shows the page gets room below it', JSON.stringify(t1));
+    // the switches in Mer are ≥ 44 px at Normal text too (Arne)
+    await tab('mer');
+    const sw = await evaluate(`return [...document.querySelectorAll('#view-mer .switch-row input')].filter((e) => e.offsetParent).map((e) => Math.round(e.getBoundingClientRect().height));`);
+    check(sw.length && Math.min(...sw) >= 44, 'round 3 (Arne): Mer switches are ≥ 44 px at Normal text size', sw.join());
   });
 }
 async function neonTests() {
@@ -761,7 +794,7 @@ async function neonTests() {
     check(tabs.length === 5 && tabs.every((t) => !t.cut && t.fs >= 13) && tabs.some((t) => t.t === 'Liste'), 'kunde 3: at 320 px with Ekstra stor the tab names are never cut (≥ 13 px)', JSON.stringify(tabs));
     const rows = await evaluate(`return Math.min(...[...document.querySelectorAll('#view-mer .switch-row')].map((r) => r.getBoundingClientRect().height));`);
     check(rows >= 44, 'kunde 3: switch rows are ≥ 44 px tall (the whole row is the target)', rows);
-    const ctl = await evaluate(`const sel = [...document.querySelectorAll('#view-mer select')].filter((e) => e.offsetParent).map((e) => e.getBoundingClientRect().height); const sw = [...document.querySelectorAll('#view-mer .switch-row input')].filter((e) => e.offsetParent).map((e) => e.getBoundingClientRect().height + 2 * Math.abs(parseFloat(getComputedStyle(e, '::before').top) || 0)); return { sel: Math.min(...sel), sw: Math.min(...sw), n: sel.length + sw.length };`);
+    const ctl = await evaluate(`const sel = [...document.querySelectorAll('#view-mer select')].filter((e) => e.offsetParent).map((e) => e.getBoundingClientRect().height); const sw = [...document.querySelectorAll('#view-mer .switch-row input')].filter((e) => e.offsetParent).map((e) => e.getBoundingClientRect().height); return { sel: Math.min(...sel), sw: Math.min(...sw), n: sel.length + sw.length };`);
     check(ctl.n && ctl.sel >= 44 && ctl.sw >= 44, 'Arne r2: Mer selects and switches (with their tap area) are ≥ 44 px at Ekstra stor', JSON.stringify(ctl));
     await tab('hjem');
     const hj = await evaluate(`const v = document.querySelector('#view-hjem'); const wide = [...v.querySelectorAll('*')].filter((e) => e.offsetParent && !e.closest('.home-feat ul') && e.getBoundingClientRect().right > innerWidth + 0.5).map((e) => e.className || e.tagName).slice(0, 5); return { sw: document.documentElement.scrollWidth, wide };`);
@@ -1013,7 +1046,9 @@ async function cloudTests() {
       check(await evaluate(`return /Tilkoblet/.test(document.querySelector('[data-conn="trumf"]').textContent) && !!document.querySelector('[data-disconnect="trumf"]') && !!document.querySelector('[data-connect="rema"]');`), 'connect: Mer shows Trumf connected, REMA not');
       check(!supa.log.some((r) => /chain_connections\?select=[^&]*secret/.test(r.path)), 'connect: the app never asks for the secret');
       await click('[data-connect="rema"]');
-      check(await waitFor(`/Gjøres fra Mac-en/.test(document.querySelector('#rema-state')?.textContent || '') && /kobles til fra en Mac én gang\. Etterpå kommer kvitteringene av seg selv/.test(document.querySelector('#chain-connect').textContent) && !/reCAPTCHA|Mer → Kjeder/.test(document.querySelector('#chain-connect').textContent) && !!document.querySelector('#chain-connect [data-action="send-mac-link"]')`, 5000), 'connect: "Koble til" for REMA opens Mer → Kjeder, which explains it is done on the Mac (no bypassing reCAPTCHA)');
+      check(await waitFor(`/Gjøres fra Mac-en/.test(document.querySelector('#rema-state')?.textContent || '') && /kobles til fra en Mac én gang\. Etterpå kommer kvitteringene av seg selv/.test(document.querySelector('#chain-connect').textContent) && !/reCAPTCHA|Mer → Kjeder/.test(document.querySelector('#chain-connect').textContent) && !!document.querySelector('#chain-connect [data-action="send-mac-link"], #chain-connect [data-action="copy-mac-link"]')`, 5000), 'connect: "Koble til" for REMA opens Mer → Kjeder, which explains it is done on the Mac (no bypassing reCAPTCHA)');
+      const ml = await evaluate(`const c = document.querySelector('#chain-connect'); const m = c.querySelector('[data-action="mail-mac-link"]'); return { share: !!navigator.share, btn: !!c.querySelector('[data-action="send-mac-link"]'), copy: !!c.querySelector('[data-action="copy-mac-link"]'), mail: m ? decodeURIComponent(m.getAttribute('href')) : null, two: /ca\\. 2 minutter: én installasjon, så logger du inn hos REMA/.test(c.textContent) };`);
+      check(ml.two && (ml.share ? ml.btn : ml.copy && /^mailto:\?subject=.*#mer\/kjeder/s.test(ml.mail || '')), 'round 3: the phone REMA card says what the Mac step is (ca. 2 min) and offers the share sheet, or «Kopier lenke» + «Send på e-post» with a link to Mer → Kjeder', JSON.stringify(ml));
       await merPage('konto');
       await waitFor(`document.querySelector('[data-disconnect="trumf"]')`, 5000);
       await click('[data-disconnect="trumf"]');
@@ -1201,6 +1236,12 @@ try {
   check(home.feat > 0 && home.feat <= 6, 'hjem: compact "Tilbud for deg" row once something is learned', `${home.feat}`);
   check(await noHScroll(), 'hjem with data: no horizontal scroll');
   const top3 = await evaluate(`const li = [...document.querySelectorAll('.home-feat li')]; return { top: li.filter((x) => x.classList.contains('top')).length, badges: [...document.querySelectorAll('.home-feat .match-badge')].map((b) => b.textContent), firstTop: li[0]?.classList.contains('top'), shadow: li[0] ? getComputedStyle(li[0].querySelector('a')).boxShadow : '', tilbud: document.querySelectorAll('#for-deg-list .feat.top .match-badge').length };`);
+  await tab('tilbud');
+  const ml = await evaluate(`const top = [...document.querySelectorAll('#for-deg-list .feat.top [data-add]')].map((b) => b.dataset.add); const marked = [...document.querySelectorAll('#offer-list .offer.match')].map((o) => o.dataset.offer);
+    return { top, marked, badge: [...document.querySelectorAll('#offer-list .offer.match .match-badge')].length, extra: marked.filter((id) => !top.includes(id)).length, counts: [...document.querySelectorAll('#offer-list .offer')].filter((o) => o.querySelector('.pre')).every((o) => /Teller med i sparemåleren/.test(o.textContent)) && [...document.querySelectorAll('#offer-list .offer')].filter((o) => !o.querySelector('.pre')).every((o) => !o.querySelector('.counts')) };`);
+  check(ml.marked.length >= 1 && ml.extra === 0 && ml.badge === ml.marked.length, 'round 3: the «Beste match» items are marked in the main Tilbud list too (and only those)', JSON.stringify(ml));
+  check(ml.counts, 'round 3 (Jonas): offers with a regular price say «Teller med i sparemåleren», others do not');
+  await tab('hjem');
   check(top3.top === Math.min(3, home.feat) && top3.firstTop && top3.badges.every((t) => t === 'Beste match') && /1\.5px/.test(top3.shadow) && top3.tilbud >= 1 && top3.tilbud <= 3, 'Jonas r2: the «For deg» top 3 get a cyan glow edge and a «Beste match» label (Hjem and Tilbud)', JSON.stringify(top3));
   await a11yAudit('hjem-data');
   await shot('04b-hjem');
