@@ -83,6 +83,9 @@ export function printedUnitPrice(text) {
 
 /** "4 for 50" → {n: 4, total: 50}; "3 for 2" → {n: 3, payFor: 2}. */
 export function multiBuy(text) {
+  // "Kjøp 3, betal for 2" / "Kjøp 3 betal 2" is the same as "3 for 2" (Maria N3)
+  const kb = String(text || '').match(/\bkjøp\s+(\d{1,2})\s*(?:stk\.?)?\s*[,.]?\s*(?:og\s+)?betal\s+(?:for\s+)?(\d{1,2})\b/i);
+  if (kb && Number(kb[2]) < Number(kb[1]) && Number(kb[1]) >= 2 && Number(kb[1]) <= 24) return { n: Number(kb[1]), payFor: Number(kb[2]) };
   const m = String(text || '').match(/\b(\d{1,2})\s*(?:stk\.?\s*|pk\.?\s*)?for\s*(?:kr\.?\s*)?(\d+(?:[.,]\d{1,2})?)\s*(?:,-|kr\b)?/i);
   if (!m) return null;
   const n = Number(m[1]);
@@ -118,6 +121,8 @@ function sizeText(text) {
 export function priceFacts(o) {
   const price = o.pricing && o.pricing.price;
   const text = `${o.heading || ''} · ${o.description || ''}`;
+  // "ca. 1,2 kg": a sum from an approximate weight is approximate too (Maria N4); a printed chain price is not
+  const approx = /\b(ca\.?|cirka|omtrent|ca)\s*\d/i.test(text);
   const q = o.quantity || {};
   const si = q.unit && q.unit.si;
   const out = { unit: null, multi: null, pieces: null, perPiece: null };
@@ -140,24 +145,24 @@ export function priceFacts(o) {
   if (mb) return { ...out, value: out.perPiece, unit: 'stk', from: false, src: 'flerkjøp' };
   if (price && si && (si.symbol === 'kg' || si.symbol === 'l') && q.size && (q.size.from || q.size.to)) {
     const size = (q.size.to || q.size.from) * tjekPieces * (si.factor || 1);
-    if (size > 0) return { ...out, value: price / size, unit: si.symbol, from: !!(q.size.to && q.size.from !== q.size.to), src: 'regnet' };
+    if (size > 0) return { ...out, value: price / size, unit: si.symbol, from: !!(q.size.to && q.size.from !== q.size.to), src: 'regnet', approx };
   }
-  if (pack && pack.size > 0) return { ...out, value: price / (pack.size * pack.pieces), unit: pack.unit, from: false, src: 'regnet' };
+  if (pack && pack.size > 0) return { ...out, value: price / (pack.size * pack.pieces), unit: pack.unit, from: false, src: 'regnet', approx };
   // counted things ("MANGO 2 PK", "Granateple, pr stk"): kr/stk from Tjek's pieces (Hege round 2)
   if (price && si && si.symbol === 'pcs' && q.size && q.size.from >= 1 && q.size.from === (q.size.to || q.size.from)) {
-    return { ...out, value: price / (q.size.from * tjekPieces), unit: 'stk', from: false, src: 'regnet' };
+    return { ...out, value: price / (q.size.from * tjekPieces), unit: 'stk', from: false, src: 'regnet', approx };
   }
   // the size only in the text ("Tine, 1,75 l", "500 g") when Tjek has no quantity (Maria L4); not for ranges or multi-buy
   const sz = !mb && price ? sizeText(o.description) : null;
-  if (sz) return { ...out, value: price / sz.size, unit: sz.unit, from: false, src: 'regnet' };
+  if (sz) return { ...out, value: price / sz.size, unit: sz.unit, from: false, src: 'regnet', approx };
   return { ...out, value: null };
 }
 
 /** A campaign name, not a product ("Kronemarked", "Ukens kupp"): hidden (Hege). */
 export function isNonProduct(title) {
   const t = String(title || '').toLowerCase().replace(/[^a-zæøå0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
-  // also with a week or year after it: "Kronemarked uke 44", "KRONEMARKED 2026" (Maria L1)
-  return /^(kronemarked|kronemarkedet|ukens (kupp|tilbud|varer)|kampanje|kampanjeuke|superlørdag|superpris|tilbud|tilbudsvarer|hele sortimentet|utvalgte varer|alt (til|for) \d+.*)( (uke|veke|år))?( \d{1,4})*$/.test(t);
+  // also with a week or year after it: "Kronemarked uke 44", "KRONEMARKED 2026" (Maria L1), or a place: "Kronemarkedet hos Kiwi" (N3)
+  return /^(kronemarked|kronemarkedet|ukens (kupp|tilbud|varer)|kampanje|kampanjeuke|superlørdag|superpris|tilbud|tilbudsvarer|hele sortimentet|utvalgte varer|alt (til|for) \d+.*)( (uke|veke|år))?( \d{1,4})*( (hos|på|i) [a-zæøå0-9 ]+)?$/.test(t);
 }
 
 /** The same product twice from one chain at one price ("Persimon" and "Persimon/kaki"): keep the fuller name. In place. */
@@ -206,10 +211,15 @@ export function bestValueIds(items, n = 3) {
     if (g.length < 3) continue;
     const ups = g.map((x) => x.o.unitPrice).sort((a, b) => a - b);
     const median = ups[Math.floor(ups.length / 2)];
-    const cands = g.filter((x) => (x.o.multi ? x.o.multi.total : x.o.price) >= 15 && !x.o.unitFrom)
-      .map((x) => ({ x, r: x.o.unitPrice / median })).filter((c) => c.r <= 0.85).sort((a, b) => a.r - b.r);
+    // Only the truly lowest kr/kg can be «lavest kilopris» (Maria N2): a "fra" price is not comparable, and when the
+    // lowest is a small item under 15 kr, nobody in the group gets the badge rather than a dearer one.
+    const firm = g.filter((x) => !x.o.unitFrom);
+    if (!firm.length) continue;
+    const low = Math.min(...firm.map((x) => x.o.unitPrice));
+    if (low / median > 0.85) continue;
     // a tie (same lowest kr/kg in two chains) gives every one of them the badge (Hege round 2)
-    if (cands.length) picks.push({ ids: cands.filter((c) => c.x.o.unitPrice === cands[0].x.o.unitPrice).map((c) => c.x.o.id), r: cands[0].r, cat: k.split('|')[0] });
+    const ids = firm.filter((x) => x.o.unitPrice === low && (x.o.multi ? x.o.multi.total : x.o.price) >= 15).map((x) => x.o.id);
+    if (ids.length) picks.push({ ids, r: low / median, cat: k.split('|')[0] });
   }
   const seen = new Set();
   return new Set(picks.sort((a, b) => a.r - b.r).filter((p) => !seen.has(p.cat) && seen.add(p.cat)).slice(0, n).flatMap((p) => p.ids));
@@ -232,6 +242,7 @@ export function normalizeOffer(o) {
     unit: up.value ? up.unit : null,
     unitFrom: !!(up.value && up.from),
     unitSrc: up.value ? up.src : null,
+    unitApprox: !!(up.value && up.approx),
     multi: up.multi,
     pieces: up.pieces,
     perPiece: up.perPiece,

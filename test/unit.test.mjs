@@ -692,6 +692,24 @@ function R2(date, name) { return { id: date + name, date, total: 50, store: 'FAK
   ok(best.has('coop') && best.has('rema') && best.size === 2, 'Hege r2: hvetemel 9,95 kr/kg in two chains: both get «Beste tilbud»', [...best].join());
 }
 
+{ // Maria 0.7.1-rc1: N2 (flour), N3 (campaign names, «Kjøp 3, betal for 2»), N4 («ca.» weights)
+  const T = await import('../js/tjek.js');
+  const it = (id, unitPrice, price) => ({ o: { id, unitPrice, unit: 'kg', price }, cat: 'torr' });
+  const flour = [it('hvetemel', 9.95, 9.95), it('spesialmel', 19.9, 39.8), it('sammalt', 24.9, 24.9), it('rug', 40, 40), it('spelt', 50, 50)];
+  ok(T.bestValueIds(flour).size === 0, 'Maria N2: Hvetemel 9,95 kr/kg is the cheapest but under 15 kr: nobody gets «lavest kilopris» (not Spesialmel)', [...T.bestValueIds(flour)].join());
+  const flour2 = flour.map((x) => (x.o.id === 'hvetemel' ? it('hvetemel', 9.95, 19.9) : x));
+  ok([...T.bestValueIds(flour2)].join() === 'hvetemel', 'Maria N2: the same flour at 2 kg / 19,90 kr gets the badge, and only it');
+  const mb = T.multiBuy('Kjøp 3, betal for 2');
+  ok(mb && mb.n === 3 && mb.payFor === 2 && T.multiBuy('kjøp 3 betal 2')?.payFor === 2 && !T.multiBuy('Kjøp 2, betal for 3'), 'Maria N3: «Kjøp 3, betal for 2» is read as 3 for 2', JSON.stringify(mb));
+  ok(T.isNonProduct('Kronemarkedet hos Kiwi') && T.isNonProduct('Kronemarked på REMA 1000') && T.isNonProduct('Ukens kupp hos Meny') && !T.isNonProduct('Kronesis hos Kiwi') && !T.isNonProduct('Tine helmelk'), 'Maria N3: «Kronemarkedet hos Kiwi» and similar are hidden');
+  const kyl = T.normalizeOffer({ id: 'x', dealer_id: 'x', heading: 'Hel kylling', description: 'Prior, ca. 1,2 kg', pricing: { price: 79.9 } });
+  const melk = T.normalizeOffer({ id: 'y', dealer_id: 'x', heading: 'Tine helmelk', description: 'Tine, 1,75 l', pricing: { price: 24.9 } });
+  const pr = T.normalizeOffer({ id: 'z', dealer_id: 'x', heading: 'Laks', description: 'ca. 1 kg. Pr kg 199,00', pricing: { price: 199 } });
+  ok(kyl.unitApprox === true && melk.unitApprox === false && pr.unitApprox === false, 'Maria N4: a unit price from «ca. 1,2 kg» is marked approximate (a printed chain price is not)', JSON.stringify([kyl.unitPrice, kyl.unitApprox, pr.unitApprox]));
+  const app = fs.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  ok(/o\.unitFrom \? 'fra ' : o\.unitApprox \? 'ca\. ' : ''/.test(app), 'Maria N4: the card shows «ca. 66,58 kr/kg»');
+}
+
 {
   const C = await import('../js/categories.js');
   const c = C.makeClassifier(C.DEFAULT_CATEGORIES, []);
@@ -710,7 +728,8 @@ function R2(date, name) { return { id: date + name, date, total: 50, store: 'FAK
   ok(/tilbud til \$\{moreChains\(deals\)\}/.test(app) && /names\.slice\(0, 3\)\.join\(', '\)/.test(app), 'Linn r2: «+ 2 tilbud til (MENY, Kiwi)»');
   ok(/classList\.contains\('calm'\) && navigator\.vibrate/.test(mot) && /!reducedMotion\(\)/.test(mot), 'Jonas r2: haptic() never buzzes with reduced motion or Rolig visning');
   ok(/haptic\(10\); drag\.dragged/.test(app) && /setGoal\(state\.settings\.saveGoal, true\); haptic\(10\)/.test(app) && /haptic\(done \? 12 : 6\)/.test(app) && /!reduce && !calmOn\(\)\) \{ meter\.classList\.add\('pulse'\)/.test(app), 'Jonas r2: haptics on goal reached, tick-off and drag end; the goal pulse skips reduced motion and Rolig visning');
-  ok(/\.donut \.arc \{ touch-action: none; \}/.test(cssR) && /\.donut \{[^}]*touch-action: pan-y/.test(cssR), 'Jonas r2: touch-action none on the ring arcs only');
+  ok(/\.donut \.arc, \.donut \.arc-hit, \.donut \.arc-vis[^{]*\{ touch-action: none; \}/.test(cssR) && /\.donut \{[^}]*touch-action: pan-y/.test(cssR), 'Jonas r2 + Maria N1: touch-action none on the ring arcs and their hit circles only');
+  ok(/addEventListener\('touchmove', \(e\) => \{ if \(ringTouch && e\.cancelable\) e\.preventDefault\(\); \}, \{ passive: false \}\)/.test(app), 'Maria N1: a touch that starts on the ring blocks the page scroll (SVG children ignore touch-action)');
   ok(/html\.calm \.feat\.top/.test(cssR) && /prefers-reduced-motion: reduce\) \{ \.feat\.top/.test(cssR) && /Beste match/.test(app), 'Jonas r2: «Beste match» top 3, without glow under reduced motion and Rolig visning');
   ok(/\.set-select \{ min-height: 44px/.test(cssR) && /\.switch-row input \{ width: 3\.2rem; height: 2rem; \}/.test(cssR), 'Arne r2: Mer selects ≥ 44 px, switches sized in rem (grow with text size)');
 }

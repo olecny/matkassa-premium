@@ -678,6 +678,19 @@ async function neonTests() {
       for (let d = 85; d <= 200; d += 15) { fire('pointermove', at(d)); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); const g = document.querySelector('.donut .arc.sel'); if (g) seen.add(g.dataset.arc); }
       fire('pointerup', at(200)); return [...seen];`);
     check(ring.length >= 1, 'Jonas r2: a mostly vertical drag that starts on the ring moves round the categories instead of being dropped', ring.join());
+    // Maria N1: a real touch gesture (not synthetic PointerEvents, which skip touch-action), straight down the ring's left side
+    const side = await evaluate(`const s = document.querySelector('.donut'); s.scrollIntoView({ block: 'center' }); const r = s.getBoundingClientRect();
+      window.__ring = { move: 0, cancel: 0 }; s.addEventListener('pointermove', () => window.__ring.move++); s.addEventListener('pointercancel', () => window.__ring.cancel++);
+      return { x: Math.round(r.left + r.width * (100 - 80) / 200), y: Math.round(r.top + r.height / 2 - 30), sy: scrollY };`);
+    await sleep(200);
+    await send('Input.synthesizeScrollGesture', { x: side.x, y: side.y, xDistance: 0, yDistance: -70, speed: 300, gestureSourceType: 'touch', repeatCount: 1 }, S);
+    await sleep(300);
+    const g1 = await evaluate(`return { sy: scrollY, ...window.__ring, sel: document.querySelector('.donut .arc.sel')?.dataset.arc ?? null };`);
+    check(Math.abs(g1.sy - side.sy) < 2 && g1.cancel === 0 && g1.move >= 3, 'Maria N1: a real vertical touch drag on the side of the ring drags round it; the page does not scroll and the pointer is not cancelled', JSON.stringify({ before: side.sy, ...g1 }));
+    const off = await evaluate(`const r = document.querySelector('.donut-card').getBoundingClientRect(); return { x: Math.round(r.left + 12), y: Math.round(r.top + r.height / 2), sy: scrollY };`);
+    await send('Input.synthesizeScrollGesture', { x: off.x, y: off.y, xDistance: 0, yDistance: -120, speed: 600, gestureSourceType: 'touch', repeatCount: 1 }, S);
+    await sleep(300);
+    check((await evaluate(`return scrollY;`)) > off.sy + 20, 'Maria N1: the same vertical swipe outside the ring still scrolls the page');
     await evaluate(`const a = document.querySelector('.donut .arc'); a.focus(); a.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); a.blur(); return true;`);
     await sleep(100);
     const hub = async () => { await evaluate(`const s = document.querySelector('.donut'); const r = s.getBoundingClientRect(); s.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 })); return true;`); return evaluate(`const g = document.querySelector('.donut .arc.sel'); return g ? g.dataset.arc : '-';`); };

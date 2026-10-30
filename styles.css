@@ -1019,4 +1019,4 @@ html.calm .meter.pulse .meter-glow, html.calm .save-card.goal-hit .save-v { anim
 @media (prefers-reduced-motion: reduce) { .meter.pulse .meter-glow, .save-card.goal-hit .save-v { animation: none !important; } }
 
 /* Jonas r2: a finger that starts on the ring drags round it instead of scrolling the page */
-.donut .arc { touch-action: none; }
+.donut .arc, .donut .arc-hit, .donut .arc-vis, .donut .arc-ring, .donut .arc-gap { touch-action: none; }

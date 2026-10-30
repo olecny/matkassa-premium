@@ -11,7 +11,7 @@ import { REMA } from './chains/rema.js';
 import { DONUT, arcLayout, dash, arcAt, meterFraction, meterScale, goalAt, enableTilt, shineBestOffers, reducedMotion } from './figures.js';
 import { enableSheetDrag, watchLargeTitle, moveTabIndicator, exitRow, flip, enableSwipe, haptic } from './motion.js';
 
-const APP_VERSION = '0.7.1-premium.rc1';
+const APP_VERSION = '0.7.1-premium';
 const STALE_MS = 6 * 60 * 60 * 1000;
 const PAGE = 60;
 const TABS = ['hjem', 'tilbud', 'liste', 'forbruk', 'mer'];
@@ -388,7 +388,7 @@ function validText(o) {
 
 function unitText(o) {
   if (!o.unitPrice) return '';
-  return `${o.unitFrom ? 'fra ' : ''}${o.multi && o.unit === 'stk' ? 'snitt ' : ''}${kr(o.unitPrice)}/${o.unit}`;
+  return `${o.unitFrom ? 'fra ' : o.unitApprox ? 'ca. ' : ''}${o.multi && o.unit === 'stk' ? 'snitt ' : ''}${kr(o.unitPrice)}/${o.unit}`;
 }
 /** The big price: "4 for 50 kr" for multi-buy, else the price. */
 const priceText = (o) => (o.multi ? (o.multi.payFor ? `${o.multi.n} for ${o.multi.payFor} · ${kr(o.price)}/stk` : `${o.multi.n} for ${kr(o.multi.total)}`) : kr(o.price));
@@ -1263,6 +1263,12 @@ function initDonut(svg, m) {
       $('#month-receipts')?.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
     }
   });
+  // Maria N1: browsers ignore touch-action on SVG children, so a touch that starts on the ring blocks the page scroll
+  // itself (a non-passive touchmove); taps still click, and a touch elsewhere on the donut still scrolls
+  let ringTouch = false;
+  svg.addEventListener('touchstart', (e) => { ringTouch = e.touches.length === 1 && !!e.target.closest('.arc'); }, { passive: true });
+  svg.addEventListener('touchmove', (e) => { if (ringTouch && e.cancelable) e.preventDefault(); }, { passive: false });
+  svg.addEventListener('touchend', () => { ringTouch = false; }, { passive: true });
   let drag = null;
   svg.addEventListener('pointerdown', (e) => {
     const r = svg.getBoundingClientRect(); // cached for the whole drag
